@@ -1,0 +1,38 @@
+[
+  {
+    "id": "065de0ac-8a46-46f5-bb29-61a610c5ecc0",
+    "phone": "09518050546",
+    "name": "Ramyun Admin",
+    "points": 0,
+    "pin_hash": "scrypt$20fbb46e-0445-43d1-b6be-5344854f8e26$beb31b2fcc7ade9e634ab3fc54ea4699e83e9a73207a2cd2a98d8ef36c23f861",
+    "ref_code": "ADMIN",
+    "role": "admin"
+  },
+  {
+    "id": "b5f3cc3c-2964-4696-b423-12b58ed981d6",
+    "phone": "01011111111",
+    "name": "Kim Minji",
+    "points": 7,
+    "pin_hash": "scrypt$917b2d3f-59ed-4d47-9178-3df41a3e0a06$25ee783a72c624cfdb8d8bd55cf86e001276bffb24da2dfe469140ace46437db",
+    "ref_code": "MINJI7",
+    "role": "customer"
+  },
+  {
+    "id": "b2f53e76-730f-4767-ba8a-15cc5a43240f",
+    "phone": "01022222222",
+    "name": "Lee Junho",
+    "points": 3,
+    "pin_hash": "scrypt$87badb52-3c1f-479c-8519-24f4750bb49e$1a18c0940d05fb7b98d874a2c71d41dd731c6c361791059d3e94eb4bf8a588b3",
+    "ref_code": "JUNHO3",
+    "role": "customer"
+  },
+  {
+    "id": "9dfd7da6-48c5-48a1-aa12-b25f600e429b",
+    "phone": "09123456789",
+    "name": "Dave",
+    "points": 0,
+    "pin_hash": "scrypt$f4f9fdeb-ce78-43b0-bd6d-71703f9c1842$72148d840d9fb3093eeab7957bb2cce2b9b727106537319b11dd9f54176b8050",
+    "ref_code": "DAVE2864",
+    "role": "customer"
+  }
+]

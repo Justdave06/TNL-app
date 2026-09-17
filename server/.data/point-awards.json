@@ -1,0 +1,20 @@
+[
+  {
+    "id": "84ac4d0e-c2c2-4882-b719-52f6ea839156",
+    "user_id": "b5f3cc3c-2964-4696-b423-12b58ed981d6",
+    "points": 7,
+    "awarded_at": "2026-09-17T15:42:02.573Z",
+    "expires_at": "2026-09-24T15:42:02.573Z",
+    "source": "manual",
+    "voucher_code": null
+  },
+  {
+    "id": "103e9ad9-4cbf-4db4-b125-6bb836a58782",
+    "user_id": "b2f53e76-730f-4767-ba8a-15cc5a43240f",
+    "points": 3,
+    "awarded_at": "2026-09-17T15:42:02.573Z",
+    "expires_at": "2026-09-24T15:42:02.573Z",
+    "source": "manual",
+    "voucher_code": null
+  }
+]
