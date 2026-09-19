@@ -1,16 +1,15 @@
 {
   "cli": {
-    "version": ">= 24.6.0",
-    "appVersionSource": "remote"
+    "version": ">= 24.6.0"
   },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
     "preview": {
-      "distribution": "internal",
       "android": {
         "buildType": "apk"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://attempt-remains-wrestling-bedford.trycloudflare.com"
       }
     },
     "production": {
