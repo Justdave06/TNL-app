@@ -1,18 +1,9 @@
 {
   "cli": {
-    "version": ">= 24.7.0",
+    "version": ">= 24.6.0",
     "appVersionSource": "remote"
   },
   "build": {
-    /**
-     * Installable APK for testing on real phones.
-     *
-     * EXPO_PUBLIC_API_URL is inlined at build time, so it must point somewhere
-     * the phone can reach. It currently uses the trycloudflare quick-tunnel URL
-     * (npm run tunnel) — NOTE: a quick tunnel gets a NEW URL every time it is
-     * restarted, so if the tunnel restarts you must update this value and
-     * rebuild. The tunnel proxies to the local server (npm run server).
-     */
     "preview": {
       "distribution": "internal",
       "android": {
