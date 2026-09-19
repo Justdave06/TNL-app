@@ -11,7 +11,6 @@ import { useAuth } from '@/lib/auth'
 import { saveViewAsImage } from '@/lib/capture'
 import { describeError } from '@/lib/errors'
 import {
-  buildRewardPayload,
   discountPercentForPoints,
   formatPhysicalCardCode,
   parsePhysicalCardQrPayload,
@@ -36,10 +35,24 @@ export default function CardScreen() {
   const { user, refresh } = useAuth()
   const { push } = useToast()
 
-  const qrPayload = React.useMemo(
-    () => (user ? JSON.stringify(buildRewardPayload(user.id)) : ''),
-    [user],
-  )
+  // The QR carries the current live-award snapshot so the cashier can redeem it
+  // with no network; it is rebuilt whenever the balance or awards change.
+  const [qrPayload, setQrPayload] = React.useState('')
+
+  React.useEffect(() => {
+    let cancelled = false
+    void api
+      .buildRewardQr()
+      .then((payload) => {
+        if (!cancelled) setQrPayload(payload)
+      })
+      .catch(() => {
+        if (!cancelled) setQrPayload('')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, user?.points])
 
   /* Poll for balance changes from a cashier redeeming this customer's QR. */
   React.useEffect(() => {

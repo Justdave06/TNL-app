@@ -34,5 +34,14 @@
     "pin_hash": "scrypt$f4f9fdeb-ce78-43b0-bd6d-71703f9c1842$72148d840d9fb3093eeab7957bb2cce2b9b727106537319b11dd9f54176b8050",
     "ref_code": "DAVE2864",
     "role": "customer"
+  },
+  {
+    "id": "da3b474c-f973-4e3d-9917-d44c9ac375b8",
+    "phone": "09000000000",
+    "name": "Dave John",
+    "points": 6,
+    "pin_hash": "scrypt$870751aa-6e54-4fb9-9d5d-557ce7f07810$0aacf024108221ed31ccd7a2c0824264bf44be351439f39d5e093b071573b99e",
+    "ref_code": "DAVE6134",
+    "role": "customer"
   }
 ]

@@ -29,6 +29,7 @@ export default function DashboardScreen() {
   const normalized = normalizeVoucherCode(code)
   const valid = normalized != null
   const percent = user ? discountPercentForPoints(user.points) : 0
+  const canRedeem = user && user.points >= REWARD_MIN_POINTS
 
   function handleRefresh() {
     return refresh().finally(() => setRefreshing(false))
@@ -42,7 +43,11 @@ export default function DashboardScreen() {
     try {
       const result = await api.redeemVoucher(normalized)
       setCode('')
-      push(`You earned ${result.pointsAdded} pt!`, 'success')
+      if (result.pending) {
+        push('Kode submitted - points appear once you are back online', 'info', 6000)
+      } else {
+        push(`You earned ${result.pointsAdded} pt!`, 'success')
+      }
       const fresh = await refresh()
       if (fresh && fresh.capReached) push('Balance cap reached! You must redeem before collecting more.', 'info', 8000)
     } catch (err) {
@@ -119,13 +124,23 @@ export default function DashboardScreen() {
             returnKeyType="done"
             onSubmitEditing={redeem}
           />
-          <PrimaryButton
-            title="Collect"
-            onPress={redeem}
-            disabled={!valid}
-            loading={submitting}
-            style={styles.redeemBtn}
-          />
+          {canRedeem ? (
+            <PrimaryButton
+              title="Redeem"
+              onPress={redeem}
+              disabled={!valid}
+              loading={submitting}
+              style={styles.redeemBtn}
+            />
+          ) : (
+            <PrimaryButton
+              title="Collect"
+              onPress={redeem}
+              disabled={!valid}
+              loading={submitting}
+              style={styles.redeemBtn}
+            />
+          )}
         </View>
         {error ? <ErrorText message={error} /> : null}
       </View>

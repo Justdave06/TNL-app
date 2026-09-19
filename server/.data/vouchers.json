@@ -70,5 +70,85 @@
     "created_at": "2026-09-17T15:46:05.083Z",
     "redeemed_by": null,
     "redeemed_at": null
+  },
+  {
+    "code": "RMYZR9FY4XF",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": "da3b474c-f973-4e3d-9917-d44c9ac375b8",
+    "redeemed_at": "2026-09-19T05:53:36.439Z"
+  },
+  {
+    "code": "RMYP3BHRAWX",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": "da3b474c-f973-4e3d-9917-d44c9ac375b8",
+    "redeemed_at": "2026-09-19T05:55:17.143Z"
+  },
+  {
+    "code": "RMYSUBZY9MG",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": null,
+    "redeemed_at": null
+  },
+  {
+    "code": "RMYKXH6EXJG",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": null,
+    "redeemed_at": null
+  },
+  {
+    "code": "RMY2W8WDVMR",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": null,
+    "redeemed_at": null
+  },
+  {
+    "code": "RMYMFM5X7JF",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": null,
+    "redeemed_at": null
+  },
+  {
+    "code": "RMY8P74KRAG",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": null,
+    "redeemed_at": null
+  },
+  {
+    "code": "RMYR9T6U6GA",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": null,
+    "redeemed_at": null
+  },
+  {
+    "code": "RMY898EQE7H",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": null,
+    "redeemed_at": null
+  },
+  {
+    "code": "RMYSGYT22XZ",
+    "batch_id": "f5bcac96-245a-4389-9264-6b4ca550a852",
+    "points": 3,
+    "created_at": "2026-09-19T05:49:12.844Z",
+    "redeemed_by": null,
+    "redeemed_at": null
   }
 ]

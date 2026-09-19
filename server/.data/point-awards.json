@@ -6,7 +6,8 @@
     "awarded_at": "2026-09-17T15:42:02.573Z",
     "expires_at": "2026-09-24T15:42:02.573Z",
     "source": "manual",
-    "voucher_code": null
+    "voucher_code": null,
+    "spent_at": null
   },
   {
     "id": "103e9ad9-4cbf-4db4-b125-6bb836a58782",
@@ -15,6 +16,27 @@
     "awarded_at": "2026-09-17T15:42:02.573Z",
     "expires_at": "2026-09-24T15:42:02.573Z",
     "source": "manual",
-    "voucher_code": null
+    "voucher_code": null,
+    "spent_at": null
+  },
+  {
+    "id": "b7b13225-8033-44e3-9c75-335cd0bea2c6",
+    "user_id": "da3b474c-f973-4e3d-9917-d44c9ac375b8",
+    "points": 3,
+    "awarded_at": "2026-09-19T05:53:36.439Z",
+    "expires_at": "2026-09-26T05:53:36.439Z",
+    "source": "voucher",
+    "voucher_code": "RMYZR9FY4XF",
+    "spent_at": null
+  },
+  {
+    "id": "de7594ee-33c3-431f-8df8-066af056a6d4",
+    "user_id": "da3b474c-f973-4e3d-9917-d44c9ac375b8",
+    "points": 3,
+    "awarded_at": "2026-09-19T05:55:17.143Z",
+    "expires_at": "2026-09-26T05:55:17.143Z",
+    "source": "voucher",
+    "voucher_code": "RMYP3BHRAWX",
+    "spent_at": null
   }
 ]

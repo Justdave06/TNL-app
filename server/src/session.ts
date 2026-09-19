@@ -38,9 +38,15 @@ function parseCookieHeader(header: string): Record<string, string> {
   return cookies
 }
 
-export function startUserSession(res: Response, payload: SessionPayload): void {
+/** Builds the signed cookie header value (name=value) for the client to reuse. */
+export function buildSessionCookie(payload: SessionPayload): string {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
-  res.cookie(COOKIE_NAME, `${body}.${sign(body, secret())}`, {
+  return `${COOKIE_NAME}=${body}.${sign(body, secret())}`
+}
+
+export function startUserSession(res: Response, payload: SessionPayload): void {
+  const value = buildSessionCookie(payload)
+  res.cookie(COOKIE_NAME, value.slice(value.indexOf('=') + 1), {
     httpOnly: true,
     sameSite: 'lax',
     path: '/',

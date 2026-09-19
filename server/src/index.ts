@@ -23,9 +23,12 @@ import {
   type VoucherCardsByPointsResponse,
   type VoucherCardsResponse,
 } from '../../src/lib/loyalty'
+import type { SyncOp } from '../../src/lib/syncTypes'
 import { AppError, httpError, requireAdmin, requireUser } from './auth'
 import {
   activatePhysicalCard,
+  applySyncOps,
+  buildSnapshot,
   countCustomers,
   createCustomer,
   createPhysicalCardBatch,
@@ -44,7 +47,8 @@ import {
   verifyPin,
 } from './db'
 import { DATA_DIR } from './db'
-import { endUserSession, startUserSession } from './session'
+import { buildSessionCookie, endUserSession, startUserSession } from './session'
+import type { SessionPayload } from './session'
 import { toCurrentUser } from './serializers'
 
 /**
@@ -95,6 +99,32 @@ interface DeleteVouchersBody {
   codes?: string[]
 }
 
+interface SyncPushBody {
+  ops?: unknown
+}
+
+/** True when a push batch is only the bootstrap of a brand-new self-registered
+ *  customer, who cannot have a session yet. `/api/auth/register` is public for
+ *  the same reason, so register_user is the one op the queue allows anonymously. */
+function isBootstrapRegister(ops: SyncOp[]): boolean {
+  return (
+    ops.length > 0 &&
+    ops.every((op) => op.type === 'register_user' && typeof op.payload === 'object' && op.payload !== null)
+  )
+}
+
+/** Works on a raw op without importing the whole op union. */
+const SYNC_OP_TYPES = ['register_user', 'redeem_voucher', 'activate_physical_card', 'spend_awards'] as const
+
+function isSyncOp(value: unknown): value is SyncOp {
+  if (!value || typeof value !== 'object') return false
+  const op = value as Record<string, unknown>
+  if (typeof op.opId !== 'string' || op.opId.length === 0) return false
+  if (typeof op.createdAt !== 'number' || typeof op.deviceId !== 'string') return false
+  if (!(SYNC_OP_TYPES as readonly string[]).includes(op.type as string)) return false
+  return typeof op.payload === 'object' && op.payload !== null
+}
+
 /** 9-11 digits starting with 0, e.g. 01012345678. */
 const PHONE_PATTERN = /^0\d{8,10}$/
 
@@ -132,8 +162,9 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
     throw httpError(401, 'Invalid phone number or PIN')
   }
 
-  startUserSession(res, { userId: user.id, role: user.role, iat: Date.now() })
-  res.json(await toCurrentUser(user))
+  const session: SessionPayload = { userId: user.id, role: user.role, iat: Date.now() }
+  startUserSession(res, session)
+  res.json({ ...(await toCurrentUser(user)), authCookie: buildSessionCookie(session) })
 })
 
 /** POST /api/auth/register - self-service customer sign-up, signed in on success. */
@@ -162,8 +193,9 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
     throw httpError(409, 'That phone number is already registered')
   }
 
-  startUserSession(res, { userId: result.user.id, role: result.user.role, iat: Date.now() })
-  res.json(await toCurrentUser(result.user))
+  const session: SessionPayload = { userId: result.user.id, role: result.user.role, iat: Date.now() }
+  startUserSession(res, session)
+  res.json({ ...(await toCurrentUser(result.user)), authCookie: buildSessionCookie(session) })
 })
 
 /** POST /api/auth/logout - drops the session cookie. */
@@ -506,6 +538,39 @@ app.get('/api/admin/physical-cards/:batchId', async (req: Request, res: Response
     })),
   }
   res.json(response)
+})
+
+/* -------------------------------------------------------------------------- */
+/* Sync (offline-first)                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * POST /api/sync/push - applies the device's queued writes as an idempotent
+ * batch. Ops carry client-generated ids so retries/replays never double-apply;
+ * a spend whose awards have not landed yet is held, not rejected.
+ */
+app.post('/api/sync/push', async (req: Request, res: Response): Promise<void> => {
+  const body = (req.body ?? {}) as SyncPushBody
+  const ops = Array.isArray(body.ops) ? body.ops.filter(isSyncOp).slice(0, 200) : []
+
+  // A new customer's first push is their self-registration - no session yet -
+  // so allow that bootstrap without auth; every other push requires sign-in.
+  if (!isBootstrapRegister(ops)) {
+    await requireUser(req)
+  }
+
+  const result = await applySyncOps(ops)
+  res.json(result)
+})
+
+/**
+ * GET /api/sync/pull - returns the full role-scoped authoritative snapshot so
+ * a device can rebuild its cache. Data is tiny (a handful of entities), so a
+ * simple full-state pull beats cursor bookkeeping.
+ */
+app.get('/api/sync/pull', async (req: Request, res: Response): Promise<void> => {
+  const user = await requireUser(req)
+  res.json(await buildSnapshot(user.role, user.id))
 })
 
 /* -------------------------------------------------------------------------- */

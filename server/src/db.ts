@@ -6,6 +6,7 @@ import {
   PHYSICAL_CARD_CODE_BODY_LENGTH,
   PHYSICAL_CARD_CODE_PREFIX,
   POINTS_EXPIRY_DAYS,
+  REWARD_MIN_POINTS,
   VOUCHER_CODE_ALPHABET,
   VOUCHER_CODE_BODY_LENGTH,
   VOUCHER_CODE_PREFIX,
@@ -14,6 +15,17 @@ import {
   type VoucherBatch,
   type VoucherTier,
 } from '../../src/lib/loyalty'
+import type {
+  ActivatePhysicalCardOpPayload,
+  RedeemVoucherOpPayload,
+  RegisterUserOpPayload,
+  SpendAwardsOpPayload,
+  SyncOp,
+  SyncOpResult,
+  SyncSnapshot,
+} from '../../src/lib/syncTypes'
+import { SYNC_API_VERSION } from '../../src/lib/syncTypes'
+import { buildSessionCookie } from './session'
 
 /**
  * User data source.
@@ -53,6 +65,12 @@ export interface PointAwardRow {
   source: 'voucher' | 'manual'
   /** Card code that produced it, when source === 'voucher'. */
   voucher_code: string | null
+  /**
+   * When the award was claimed at the register. Soft-deleted so sync-aware
+   * devices can tell "spent" from "never existed" (a spent award is done;
+   * a missing one may still be arriving through the op queue).
+   */
+  spent_at: string | null
 }
 
 export type RedeemResult =
@@ -211,6 +229,7 @@ function seedAwards(users: UserRow[]): PointAwardRow[] {
       expires_at: awardExpiry(now),
       source: 'manual' as const,
       voucher_code: null,
+      spent_at: null,
     }))
 }
 
@@ -245,6 +264,15 @@ async function loadAwards(): Promise<PointAwardRow[]> {
   if (awardCache) return awardCache
   try {
     awardCache = JSON.parse(await readFile(AWARDS_FILE, 'utf8')) as PointAwardRow[]
+    // One-time migration for installs written before soft-deletes existed.
+    let migrated = false
+    for (const award of awardCache) {
+      if (award.spent_at === undefined) {
+        award.spent_at = null
+        migrated = true
+      }
+    }
+    if (migrated) await persistAwards(awardCache)
   } catch {
     // A missing awards file just means no points have been granted yet.
     awardCache = []
@@ -258,12 +286,12 @@ async function persistAwards(awards: PointAwardRow[]): Promise<void> {
   await writeFile(AWARDS_FILE, JSON.stringify(awards, null, 2), 'utf8')
 }
 
-/** Non-expired awards for one user, oldest first. */
+/** Non-expired, unspent awards for one user, oldest first. */
 async function liveAwards(userId: string): Promise<PointAwardRow[]> {
   const now = Date.now()
   const awards = await loadAwards()
   return awards
-    .filter((award) => award.user_id === userId && !isExpired(award, now))
+    .filter((award) => award.user_id === userId && award.spent_at == null && !isExpired(award, now))
     .sort((a, b) => a.awarded_at.localeCompare(b.awarded_at))
 }
 
@@ -521,7 +549,11 @@ export async function redeemRewardPoints(
 
     const spent = liveTotal
     const awardsRef = await loadAwards()
-    for (const award of awards) awardsRef.splice(awardsRef.indexOf(award), 1)
+    const spentAt = new Date().toISOString()
+    for (const award of awards) {
+      const stored = awardsRef.find((candidate) => candidate.id === award.id)
+      if (stored) stored.spent_at = spentAt
+    }
     user.points = 0
 
     await Promise.all([persistAwards(awardsRef), persistUsers(users)])
@@ -623,6 +655,7 @@ export async function redeemVoucher(input: {
       expires_at: awardExpiry(now),
       source: 'voucher',
       voucher_code: voucher.code,
+      spent_at: null,
     }
 
     const awardsRef = await loadAwards()
@@ -825,4 +858,363 @@ export async function createPhysicalCardBatch(quantity: number): Promise<{
     await persistPhysicalCards(cards)
     return { batchId, cards: batch }
   })
+}
+
+/* -------------------------------------------------------------------------- */
+/* Offline-first sync                                                          */
+/* -------------------------------------------------------------------------- */
+
+const SYNC_OPS_FILE = join(DATA_DIR, 'sync-ops.json')
+const SYNC_HELD_FILE = join(DATA_DIR, 'sync-held.json')
+
+/** One applied op's idempotent result (replayed to any device that re-pushes). */
+interface JournalEntry {
+  opId: string
+  type: string
+  appliedAt: string
+  result: SyncOpResult
+}
+
+/** A spend waiting on awards that have not arrived yet (held, not rejected). */
+interface HeldOp {
+  op: SyncOp
+  heldSince: number
+}
+
+/** Seven days is long enough for a queued points-batch to land; beyond that the
+ *  order is abandoned rather than left ghosted forever. */
+const HELD_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+let journalCache: JournalEntry[] | null = null
+let heldCache: HeldOp[] | null = null
+
+async function loadSyncJournal(): Promise<JournalEntry[]> {
+  if (journalCache) return journalCache
+  try {
+    journalCache = JSON.parse(await readFile(SYNC_OPS_FILE, 'utf8')) as JournalEntry[]
+  } catch {
+    journalCache = []
+  }
+  return journalCache
+}
+
+async function persistSyncJournal(journal: JournalEntry[]): Promise<void> {
+  await mkdir(dirname(SYNC_OPS_FILE), { recursive: true })
+  await writeFile(SYNC_OPS_FILE, JSON.stringify(journal, null, 2), 'utf8')
+}
+
+async function loadHeldOps(): Promise<HeldOp[]> {
+  if (heldCache) return heldCache
+  try {
+    heldCache = JSON.parse(await readFile(SYNC_HELD_FILE, 'utf8')) as HeldOp[]
+  } catch {
+    heldCache = []
+  }
+  return heldCache
+}
+
+async function persistHeldOps(held: HeldOp[]): Promise<void> {
+  await mkdir(dirname(SYNC_HELD_FILE), { recursive: true })
+  await writeFile(SYNC_HELD_FILE, JSON.stringify(held, null, 2), 'utf8')
+}
+
+async function applyOp(op: SyncOp): Promise<{ kind: 'held' } | { kind: 'result'; result: SyncOpResult }> {
+  if (op.type === 'register_user') {
+    const payload = op.payload as RegisterUserOpPayload
+    const users = await loadUsers()
+    if (users.some((user) => user.phone === payload.phone)) {
+      return {
+        kind: 'result',
+        result: { opId: op.opId, ok: false, reason: 'phone_taken', message: 'That phone number is already registered' },
+      }
+    }
+    if (users.some((user) => user.id === payload.userId)) {
+      return {
+        kind: 'result',
+        result: { opId: op.opId, ok: false, reason: 'id_taken', message: 'That account already exists' },
+      }
+    }
+
+    const refCode = generateRefCode(payload.name, new Set(users.map((user) => user.ref_code)))
+    const user: UserRow = {
+      id: payload.userId,
+      phone: payload.phone,
+      name: payload.name,
+      points: 0,
+      pin_hash: hashPin(payload.pin),
+      ref_code: refCode,
+      role: 'customer',
+    }
+    users.push(user)
+    await persistUsers(users)
+
+    const authCookie = buildSessionCookie({ userId: user.id, role: 'customer', iat: Date.now() })
+    return {
+      kind: 'result',
+      result: {
+        opId: op.opId,
+        ok: true,
+        state: { customerName: user.name, authCookie },
+      },
+    }
+  }
+
+  if (op.type === 'redeem_voucher') {
+    const payload = op.payload as RedeemVoucherOpPayload
+    const users = await loadUsers()
+    const user = users.find((candidate) => candidate.id === payload.userId)
+    if (!user) {
+      return { kind: 'result', result: { opId: op.opId, ok: false, reason: 'user_not_found', message: 'Account not found' } }
+    }
+
+    const vouchers = await loadVouchers()
+    const voucher = vouchers.find((candidate) => candidate.code === payload.code)
+    if (!voucher) {
+      return {
+        kind: 'result',
+        result: {
+          opId: op.opId,
+          ok: false,
+          reason: 'unknown_code',
+          message: 'That kode was not recognised or has already been used — vouchers start with RMY, e.g. RMY-4K7P-2XQ9',
+        },
+      }
+    }
+    if (voucher.redeemed_at) {
+      return { kind: 'result', result: { opId: op.opId, ok: false, reason: 'already_redeemed', message: 'That card has already been used' } }
+    }
+
+    const awards = await loadAwards()
+    const live = awards
+      .filter((award) => award.user_id === user.id && award.spent_at == null && !isExpired(award))
+      .reduce((total, award) => total + award.points, 0)
+    if (live + voucher.points > MAX_POINT_BALANCE) {
+      return {
+        kind: 'result',
+        result: {
+          opId: op.opId,
+          ok: false,
+          reason: 'balance_cap',
+          message: `You have ${live} points - the maximum is ${MAX_POINT_BALANCE}. Redeem your points before adding more.`,
+        },
+      }
+    }
+
+    awards.push({
+      id: payload.awardId,
+      user_id: user.id,
+      points: voucher.points,
+      awarded_at: new Date(payload.awardedAt).toISOString(),
+      expires_at: awardExpiry(payload.awardedAt),
+      source: 'voucher',
+      voucher_code: voucher.code,
+      spent_at: null,
+    })
+    voucher.redeemed_by = user.id
+    voucher.redeemed_at = new Date().toISOString()
+    user.points = Math.min(MAX_POINT_BALANCE, live + voucher.points)
+
+    await Promise.all([persistAwards(awards), persistVouchers(vouchers), persistUsers(users)])
+    return {
+      kind: 'result',
+      result: { opId: op.opId, ok: true, state: { customerName: user.name } },
+    }
+  }
+
+  if (op.type === 'activate_physical_card') {
+    const payload = op.payload as ActivatePhysicalCardOpPayload
+    const users = await loadUsers()
+    if (!users.some((candidate) => candidate.id === payload.userId)) {
+      return { kind: 'result', result: { opId: op.opId, ok: false, reason: 'user_not_found', message: 'Account not found' } }
+    }
+
+    const cards = await loadPhysicalCards()
+    const card = cards.find((candidate) => candidate.kode === payload.kode)
+    if (!card) {
+      return {
+        kind: 'result',
+        result: { opId: op.opId, ok: false, reason: 'unknown_kode', message: 'That card kode was not recognised - please check it' },
+      }
+    }
+    if (card.activated_at) {
+      return {
+        kind: 'result',
+        result: { opId: op.opId, ok: false, reason: 'already_activated', message: 'That card has already been activated by another account' },
+      }
+    }
+
+    card.activated_by = payload.userId
+    card.activated_at = new Date().toISOString()
+    await persistPhysicalCards(cards)
+    return {
+      kind: 'result',
+      result: {
+        opId: op.opId,
+        ok: true,
+        state: { customerName: users.find((candidate) => candidate.id === payload.userId)?.name },
+      },
+    }
+  }
+
+  if (op.type === 'spend_awards') {
+    const payload = op.payload as SpendAwardsOpPayload
+    const users = await loadUsers()
+    const user = users.find((candidate) => candidate.id === payload.userId)
+    if (!user) {
+      return { kind: 'result', result: { opId: op.opId, ok: false, reason: 'user_not_found', message: 'Customer not found' } }
+    }
+
+    const awards = await loadAwards()
+    const wanted = new Set(payload.awardIds)
+    const missing = payload.awardIds.filter((id) => !awards.some((award) => award.id === id))
+    if (missing.length > 0) {
+      // The awards are probably still travelling through the op queue on the
+      // customer's phone. Hold - not reject - so when the claim lands this
+      // spend can still win.
+      return { kind: 'held' }
+    }
+
+    const requested = awards.filter((award) => wanted.has(award.id))
+    if (requested.some((award) => award.spent_at != null)) {
+      return {
+        kind: 'result',
+        result: {
+          opId: op.opId,
+          ok: false,
+          reason: 'already_spent',
+          message: "This reward has already been redeemed elsewhere - the customer's points are gone.",
+        },
+      }
+    }
+    const expired = requested.find((award) => isExpired(award))
+    if (expired) {
+      return {
+        kind: 'result',
+        result: {
+          opId: op.opId,
+          ok: false,
+          reason: 'expired',
+          message: "This reward has expired - the customer's points are no longer valid.",
+        },
+      }
+    }
+
+    const allLive = awards
+      .filter((award) => award.user_id === user.id && award.spent_at == null && !isExpired(award))
+      .reduce((total, award) => total + award.points, 0)
+    if (allLive < REWARD_MIN_POINTS) {
+      return {
+        kind: 'result',
+        result: {
+          opId: op.opId,
+          ok: false,
+          reason: 'insufficient_points',
+          message: `This customer needs at least ${REWARD_MIN_POINTS} points to claim - they only have ${allLive}`,
+        },
+      }
+    }
+
+    const spentAt = new Date().toISOString()
+    for (const award of requested) award.spent_at = spentAt
+    const remaining = awards
+      .filter((award) => award.user_id === user.id && award.spent_at == null && !isExpired(award))
+      .reduce((total, award) => total + award.points, 0)
+    user.points = remaining
+
+    await Promise.all([persistAwards(awards), persistUsers(users)])
+    return {
+      kind: 'result',
+      result: {
+        opId: op.opId,
+        ok: true,
+        state: { remainingBalance: remaining, customerName: user.name },
+      },
+    }
+  }
+
+  return { kind: 'result', result: { opId: op.opId, ok: false, reason: 'unknown_op', message: 'Unknown operation type' } }
+}
+
+/**
+ * Applies a batch of queued ops atomically under the writer lock. Held spends
+ * (waiting on awards that have not appeared yet) are re-checked before each
+ * batch and persisted so a server restart does not lose them.
+ */
+export async function applySyncOps(ops: SyncOp[]): Promise<{ results: SyncOpResult[]; serverTime: number }> {
+  return withLock(async () => {
+    const journal = await loadSyncJournal()
+    const held = await loadHeldOps()
+    const results: SyncOpResult[] = []
+    const stillHeld: HeldOp[] = []
+    const queue: HeldOp[] = [...held, ...ops.map((op) => ({ op, heldSince: Date.now() } as HeldOp))]
+
+    for (const entry of queue) {
+      const existing = journal.find((candidate) => candidate.opId === entry.op.opId)
+      if (existing) {
+        results.push(existing.result)
+        continue
+      }
+
+      if (Date.now() - entry.heldSince > HELD_MAX_AGE_MS) {
+        const result: SyncOpResult = {
+          opId: entry.op.opId,
+          ok: false,
+          reason: 'expired',
+          message: "This reward could not be finalized because the customer's points never arrived.",
+        }
+        journal.push({ opId: entry.op.opId, type: entry.op.type, appliedAt: new Date().toISOString(), result })
+        results.push(result)
+        continue
+      }
+
+      const applied = await applyOp(entry.op)
+      if (applied.kind === 'held') {
+        stillHeld.push(entry)
+        continue
+      }
+
+      journal.push({
+        opId: entry.op.opId,
+        type: entry.op.type,
+        appliedAt: new Date().toISOString(),
+        result: applied.result,
+      })
+      results.push(applied.result)
+    }
+
+    heldCache = stillHeld
+    journalCache = journal
+    await persistHeldOps(stillHeld)
+    await persistSyncJournal(journal)
+
+    return { results, serverTime: Date.now() }
+  })
+}
+
+/** Role-scoped authoritative snapshot for one signed-in device. */
+export async function buildSnapshot(role: UserRole, userId: string): Promise<SyncSnapshot> {
+  const users = await loadUsers()
+  const seen = role === 'admin' ? users : users.filter((user) => user.id === userId)
+
+  const awards = (await loadAwards()).filter((award) => (role === 'admin' ? true : award.user_id === userId))
+  const vouchers = role === 'admin' ? await loadVouchers() : []
+  const physicalCards = (await loadPhysicalCards()).filter(
+    (card) => (role === 'admin' ? true : card.activated_by === userId),
+  )
+
+  return {
+    version: SYNC_API_VERSION,
+    serverTime: Date.now(),
+    users: seen.map((user) => ({
+      id: user.id,
+      phone: user.phone,
+      name: user.name,
+      points: user.points,
+      ref_code: user.ref_code,
+      role: user.role,
+    })),
+    awards,
+    vouchers,
+    physicalCards,
+  }
 }

@@ -127,14 +127,17 @@ export function Field({
   hint,
   ...inputProps
 }: { label?: string; hint?: string } & TextInputProps) {
+  const { style: inputStyle, ...restInputProps } = inputProps
   return (
     <View style={styles.field}>
       {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
       <TextInput
         placeholderTextColor={colors.textFaint}
         selectionColor={colors.amber}
-        style={[styles.input, inputProps.style]}
-        {...inputProps}
+        style={[styles.input, inputStyle]}
+        multiline={false}
+        numberOfLines={1}
+        {...restInputProps}
       />
       {hint ? <Text style={styles.fieldHint}>{hint}</Text> : null}
     </View>

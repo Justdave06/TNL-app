@@ -4,6 +4,8 @@ import * as React from 'react'
 import { ActivityIndicator, StyleSheet, View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { AuthProvider, useAuth } from '@/lib/auth'
+import { SyncProvider } from '@/lib/sync-provider'
+import * as sync from '@/lib/sync'
 import { ToastProvider } from '@/lib/toast'
 import { colors } from '@/lib/theme'
 
@@ -11,6 +13,10 @@ function RootLayoutNav() {
   const { user, bootstrapping } = useAuth()
   const segments = useSegments()
   const router = useRouter()
+
+  // Watch connectivity and app foregrounding so queued writes flush whenever
+  // the device can reach the server.
+  React.useEffect(() => sync.activateAutoSync(), [])
 
   React.useEffect(() => {
     if (bootstrapping) return
@@ -50,7 +56,9 @@ export default function RootLayout() {
       <AuthProvider>
         <ToastProvider>
           <StatusBar style="light" />
-          <RootLayoutNav />
+          <SyncProvider>
+            <RootLayoutNav />
+          </SyncProvider>
         </ToastProvider>
       </AuthProvider>
     </SafeAreaProvider>

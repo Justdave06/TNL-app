@@ -99,11 +99,23 @@ export interface CurrentUser {
   hasPhysicalCard: boolean
 }
 
+/** One live award embedded in the reward QR, so a cashier can spend offline. */
+export interface RewardQrAward {
+  id: string
+  points: number
+  /** Epoch ms the award expires. */
+  expiresAt: number
+}
+
 /** JSON body encoded into the reward QR shown to the cashier. */
 export interface RewardQrPayload {
   type: typeof REWARD_QR_TYPE
   userId: string
   issuedAt: number
+  /** Display name, carried so the cashier's screen works fully offline. */
+  name?: string
+  /** Snapshot of the member's current live awards for an offline spend. */
+  awards?: RewardQrAward[]
 }
 
 export interface RedeemRewardResponse {
@@ -113,6 +125,8 @@ export interface RedeemRewardResponse {
   remainingPoints: number
   discountApplied: string
   pointsSpent: number
+  /** True when the spend was queued and is waiting on the next sync. */
+  pending?: true
 }
 
 export interface RedeemVoucherResponse {
@@ -121,6 +135,8 @@ export interface RedeemVoucherResponse {
   pointsAdded: number
   newBalance: number
   expiresAt: number
+  /** True when the code was queued and points will land after the next sync. */
+  pending?: true
 }
 
 /** Result of activating a physical TNL card. */
@@ -128,10 +144,22 @@ export interface ActivatePhysicalCardResponse {
   success: true
   code: string
   activatedAt: number
+  /** True when the activation was queued and is waiting on the next sync. */
+  pending?: true
 }
 
-export function buildRewardPayload(userId: string): RewardQrPayload {
-  return { type: REWARD_QR_TYPE, userId, issuedAt: Date.now() }
+/** Live awards formatted for the reward QR. */
+export function toRewardQrAwards(
+  awards: { id: string; points: number; expires_at: string }[],
+): RewardQrAward[] {
+  return awards.map((award) => ({ id: award.id, points: award.points, expiresAt: new Date(award.expires_at).getTime() }))
+}
+
+export function buildRewardPayload(
+  userId: string,
+  extras?: { name?: string; awards?: RewardQrAward[] },
+): RewardQrPayload {
+  return { type: REWARD_QR_TYPE, userId, issuedAt: Date.now(), name: extras?.name, awards: extras?.awards }
 }
 
 /**
@@ -146,7 +174,23 @@ export function parseRewardPayload(raw: string): RewardQrPayload | null {
     try {
       const parsed = JSON.parse(value) as Partial<RewardQrPayload>
       if (parsed.type === REWARD_QR_TYPE && typeof parsed.userId === 'string' && parsed.userId) {
-        return { type: REWARD_QR_TYPE, userId: parsed.userId, issuedAt: parsed.issuedAt ?? Date.now() }
+        const awards = Array.isArray(parsed.awards)
+          ? parsed.awards.filter(
+              (award): award is RewardQrAward =>
+                award != null &&
+                typeof award === 'object' &&
+                typeof award.id === 'string' &&
+                typeof award.points === 'number' &&
+                typeof award.expiresAt === 'number',
+            )
+          : undefined
+        return {
+          type: REWARD_QR_TYPE,
+          userId: parsed.userId,
+          issuedAt: parsed.issuedAt ?? Date.now(),
+          name: typeof parsed.name === 'string' ? parsed.name : undefined,
+          awards,
+        }
       }
       return null
     } catch {

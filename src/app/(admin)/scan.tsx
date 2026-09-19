@@ -81,10 +81,13 @@ export default function ScanScreen() {
 
     try {
       const response: RedeemRewardResponse = await api.redeemReward(code)
+      const detail = response.pending
+        ? `${response.customerName} spent ${response.pointsSpent} points - refund if the server rejects this on the next sync.`
+        : `${response.customerName} spent ${response.pointsSpent} points and now has ${response.remainingPoints}.`
       setResult({
         kind: 'success',
         title: `${response.discountApplied} discount applied`,
-        detail: `${response.customerName} spent ${response.pointsSpent} points and now has ${response.remainingPoints}.`,
+        detail,
       })
       push(`${response.discountApplied} discount applied for ${response.customerName}`, 'success')
       scheduleAutoResume(SUCCESS_HOLD_MS)

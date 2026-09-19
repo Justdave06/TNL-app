@@ -11,8 +11,7 @@
      * the phone can reach. It currently uses the trycloudflare quick-tunnel URL
      * (npm run tunnel) — NOTE: a quick tunnel gets a NEW URL every time it is
      * restarted, so if the tunnel restarts you must update this value and
-     * rebuild. For same-network-only testing you can swap in your PC's IP,
-     * e.g. http://<pc-ip>:3000.
+     * rebuild. The tunnel proxies to the local server (npm run server).
      */
     "preview": {
       "distribution": "internal",
@@ -20,7 +19,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://sheep-improving-pizza-titles.trycloudflare.com"
+        "EXPO_PUBLIC_API_URL": "https://attempt-remains-wrestling-bedford.trycloudflare.com"
       }
     },
     "production": {
