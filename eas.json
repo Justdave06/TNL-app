@@ -10,7 +10,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://attempt-remains-wrestling-bedford.trycloudflare.com"
+        "EXPO_PUBLIC_API_URL": "https://alowdgjqnhndzvlrgxsg.supabase.co"
       }
     },
     "production": {
@@ -18,7 +18,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://your-supabase-project.supabase.co"
+        "EXPO_PUBLIC_API_URL": "https://alowdgjqnhndzvlrgxsg.supabase.co"
       }
     }
   },
