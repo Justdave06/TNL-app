@@ -2,6 +2,8 @@ import { Ionicons } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
 import * as React from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import * as Haptics from 'expo-haptics'
+import { Audio } from 'expo-av'
 import QrCamera from '@/components/qr-scanner'
 import { Card, PrimaryButton } from '@/components/ui'
 import * as api from '@/lib/api'
@@ -35,6 +37,37 @@ export default function ScanScreen() {
   const [submitting, setSubmitting] = React.useState(false)
   const [result, setResult] = React.useState<ScanResult | null>(null)
   const [manualUserId, setManualUserId] = React.useState('')
+
+  // Sound + haptics
+  const [successSound, setSuccessSound] = React.useState<Audio.Sound | null>(null)
+  const [errorSound, setErrorSound] = React.useState<Audio.Sound | null>(null)
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const { sound: s1 } = await Audio.Sound.createAsync(require('@/assets/sounds/success.mp3'))
+        const { sound: s2 } = await Audio.Sound.createAsync(require('@/assets/sounds/error.mp3'))
+        setSuccessSound(s1)
+        setErrorSound(s2)
+      } catch {
+        // Sounds optional - haptics will still work
+      }
+    })()
+    return () => {
+      successSound?.unloadAsync()
+      errorSound?.unloadAsync()
+    }
+  }, [])
+
+  function playSuccess(): void {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+    successSound?.replayAsync()
+  }
+
+  function playError(): void {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
+    errorSound?.replayAsync()
+  }
 
   const autoResumeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastDecodedRef = React.useRef('')
@@ -90,6 +123,7 @@ export default function ScanScreen() {
         detail,
       })
       push(`${response.discountApplied} discount applied for ${response.customerName}`, 'success')
+      playSuccess()
       scheduleAutoResume(SUCCESS_HOLD_MS)
     } catch (error) {
       const message = describeError(error)
@@ -98,6 +132,7 @@ export default function ScanScreen() {
           ? { kind: 'error', title: 'Not enough points', detail: message }
           : { kind: 'error', title: 'Redemption failed', detail: message },
       )
+      playError()
       scheduleAutoResume(ERROR_HOLD_MS)
     } finally {
       setSubmitting(false)
