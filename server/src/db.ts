@@ -1,6 +1,7 @@
 import { randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
   MAX_POINT_BALANCE,
   PHYSICAL_CARD_CODE_BODY_LENGTH,
@@ -117,6 +118,22 @@ const DATA_FILE = join(DATA_DIR, 'users.json')
 const VOUCHERS_FILE = join(DATA_DIR, 'vouchers.json')
 const AWARDS_FILE = join(DATA_DIR, 'point-awards.json')
 const PHYSICAL_CARDS_FILE = join(DATA_DIR, 'physical-cards.json')
+
+/* -------------------------------------------------------------------------- */
+/* Supabase client                                                            */
+/* -------------------------------------------------------------------------- */
+
+let supabaseClient: SupabaseClient | null = null
+
+function supabase(): SupabaseClient | null {
+  const url = process.env.SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return null
+  supabaseClient ??= createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  return supabaseClient
+}
 
 /* -------------------------------------------------------------------------- */
 /* PIN hashing                                                                */
@@ -304,6 +321,23 @@ export async function getLivePointsInfo(userId: string): Promise<{
   expiries: number[]
   capReached: boolean
 }> {
+  const client = supabase()
+  if (client) {
+    const { data, error } = await client
+      .from('point_awards')
+      .select('points, expires_at')
+      .eq('user_id', userId)
+      .gt('expires_at', new Date().toISOString())
+    if (error) throw new Error(`Failed to load points: ${error.message}`)
+    const rows = (data ?? []) as { points: number; expires_at: string }[]
+    const total = rows.reduce((sum, row) => sum + row.points, 0)
+    return {
+      points: Math.min(MAX_POINT_BALANCE, total),
+      expiries: rows.map((row) => new Date(row.expires_at).getTime()).sort((a, b) => a - b),
+      capReached: total >= MAX_POINT_BALANCE,
+    }
+  }
+
   const awards = await liveAwards(userId)
   const total = awards.reduce((sum, award) => sum + award.points, 0)
   return {
@@ -359,6 +393,18 @@ function generateVoucherCode(taken?: Set<string>): string {
   throw new Error('Could not generate a unique card code')
 }
 
+/** Every card, from whichever backend is active. */
+async function loadAllVouchers(): Promise<Pick<VoucherRow, 'batch_id' | 'points' | 'created_at' | 'redeemed_at'>[]> {
+  const client = supabase()
+  if (!client) return loadVouchers()
+
+  const { data, error } = await client
+    .from('vouchers')
+    .select('batch_id, points, created_at, redeemed_at')
+  if (error) throw new Error(`Failed to load cards: ${error.message}`)
+  return (data ?? []) as Pick<VoucherRow, 'batch_id' | 'points' | 'created_at' | 'redeemed_at'>[]
+}
+
 /* -------------------------------------------------------------------------- */
 /* Local physical-card store                                                  */
 /* -------------------------------------------------------------------------- */
@@ -403,6 +449,16 @@ function generatePhysicalCardCode(taken: Set<string>): string {
     if (!taken.has(kode)) return kode
   }
   throw new Error('Could not generate a unique card kode')
+}
+
+/** Every physical card, from whichever backend is active. */
+async function loadAllPhysicalCards(): Promise<PhysicalCardRow[]> {
+  const client = supabase()
+  if (!client) return loadPhysicalCards()
+
+  const { data, error } = await client.from('physical_cards').select('*')
+  if (error) throw new Error(`Failed to load physical cards: ${error.message}`)
+  return (data ?? []) as PhysicalCardRow[]
 }
 
 /* -------------------------------------------------------------------------- */
@@ -484,17 +540,41 @@ export async function seedCatalog(): Promise<{ voucherCodes: string[]; cardKodes
 /* -------------------------------------------------------------------------- */
 
 export async function getUserById(id: string): Promise<UserRow | null> {
+  const client = supabase()
+  if (client) {
+    const { data, error } = await client.from('users').select('*').eq('id', id).maybeSingle()
+    if (error) throw new Error(`Failed to load user: ${error.message}`)
+    return (data as UserRow | null) ?? null
+  }
+
   const users = await loadUsers()
   return users.find((user) => user.id === id) ?? null
 }
 
 export async function getUserByPhone(phone: string): Promise<UserRow | null> {
+  const client = supabase()
+  if (client) {
+    const { data, error } = await client.from('users').select('*').eq('phone', phone).maybeSingle()
+    if (error) throw new Error(`Failed to load user: ${error.message}`)
+    return (data as UserRow | null) ?? null
+  }
+
   const users = await loadUsers()
   return users.find((user) => user.phone === phone) ?? null
 }
 
 /** Total number of registered customer accounts (admins excluded). */
 export async function countCustomers(): Promise<number> {
+  const client = supabase()
+  if (client) {
+    const { count, error } = await client
+      .from('users')
+      .select('*', { count: 'exact', head: true })
+      .eq('role', 'customer')
+    if (error) throw new Error(`Failed to count customers: ${error.message}`)
+    return count ?? 0
+  }
+
   const users = await loadUsers()
   return users.filter((user) => user.role === 'customer').length
 }
@@ -505,6 +585,40 @@ export async function countCustomers(): Promise<number> {
  */
 export async function createCustomer(input: NewCustomerInput): Promise<CreateUserResult> {
   const pinHash = hashPin(input.pin)
+  const client = supabase()
+
+  if (client) {
+    const { data: existing, error: lookupError } = await client
+      .from('users')
+      .select('id')
+      .eq('phone', input.phone)
+      .maybeSingle()
+    if (lookupError) throw new Error(`Failed to create account: ${lookupError.message}`)
+    if (existing) return { ok: false, reason: 'phone_taken' }
+
+    const { data, error } = await client
+      .from('users')
+      .insert({
+        phone: input.phone,
+        name: input.name,
+        points: 0,
+        pin_hash: pinHash,
+        ref_code: generateRefCode(input.name, new Set()),
+        role: 'customer',
+      })
+      .select('*')
+      .maybeSingle()
+
+    if (error) {
+      // 23505 = unique_violation: the phone (or ref_code) is already in use.
+      if (error.code === '23505') return { ok: false, reason: 'phone_taken' }
+      throw new Error(`Failed to create account: ${error.message}`)
+    }
+    if (!data) throw new Error('Failed to create account')
+
+    return { ok: true, user: data as UserRow }
+  }
+
   return withLock(async () => {
     const users = await loadUsers()
     if (users.some((user) => user.phone === input.phone)) {
@@ -536,6 +650,31 @@ export async function redeemRewardPoints(
   userId: string,
   minPoints: number,
 ): Promise<RedeemResult> {
+  const client = supabase()
+  if (client) {
+    const { data, error } = await client.rpc('redeem_reward_points', {
+      p_user_id: userId,
+      p_min_points: minPoints,
+    })
+    if (error) {
+      const message = error.message ?? ''
+      if (message.includes('insufficient_points')) {
+        return { ok: false, reason: 'insufficient_points', points: 0 }
+      }
+      if (message.includes('user_not_found')) return { ok: false, reason: 'user_not_found' }
+      throw new Error(`Failed to redeem reward: ${error.message}`)
+    }
+    const row =
+      (data as { user_id: string; customer_name: string; points_spent: number }[] | null)?.[0]
+    if (!row) return { ok: false, reason: 'user_not_found' }
+    return {
+      ok: true,
+      user: { id: row.user_id, name: row.customer_name },
+      remainingPoints: 0,
+      pointsSpent: row.points_spent,
+    }
+  }
+
   return withLock(async () => {
     const users = await loadUsers()
     const user = users.find((candidate) => candidate.id === userId)
@@ -575,7 +714,7 @@ export async function redeemRewardPoints(
 export async function resolvePhysicalCardOwner(
   kode: string,
 ): Promise<{ ok: true; userId: string } | { ok: false; reason: 'unknown_kode' | 'not_activated' }> {
-  const cards = await loadPhysicalCards()
+  const cards = await loadAllPhysicalCards()
   const card = cards.find((candidate) => candidate.kode === kode)
   if (!card) return { ok: false, reason: 'unknown_kode' }
   if (!card.activated_by) return { ok: false, reason: 'not_activated' }
@@ -595,6 +734,23 @@ export async function activatePhysicalCard(input: {
   | { ok: true; kode: string; activatedAt: string }
   | { ok: false; reason: 'unknown_kode' | 'user_not_found' | 'already_activated' }
 > {
+  const client = supabase()
+
+  if (client) {
+    const { data, error } = await client.rpc('activate_physical_card', {
+      p_kode: input.kode,
+      p_user_id: input.userId,
+    })
+    if (error) {
+      const message = error.message ?? ''
+      if (message.includes('unknown_kode')) return { ok: false, reason: 'unknown_kode' }
+      if (message.includes('user_not_found')) return { ok: false, reason: 'user_not_found' }
+      if (message.includes('already_activated')) return { ok: false, reason: 'already_activated' }
+      throw new Error(`Failed to activate card: ${error.message}`)
+    }
+    return { ok: true, kode: input.kode, activatedAt: data as string }
+  }
+
   return withLock(async () => {
     const users = await loadUsers()
     if (!users.some((candidate) => candidate.id === input.userId)) {
@@ -624,6 +780,34 @@ export async function redeemVoucher(input: {
   code: string
   userId: string
 }): Promise<RedeemVoucherResult> {
+  const client = supabase()
+
+  if (client) {
+    const { data, error } = await client.rpc('redeem_voucher_card', {
+      p_code: input.code,
+      p_user_id: input.userId,
+    })
+
+    if (error) {
+      const message = error.message ?? ''
+      if (message.includes('already_redeemed')) return { ok: false, reason: 'already_redeemed' }
+      if (message.includes('unknown_code')) return { ok: false, reason: 'unknown_code' }
+      if (message.includes('user_not_found')) return { ok: false, reason: 'user_not_found' }
+      if (message.includes('balance_cap')) return { ok: false, reason: 'balance_cap', cap: MAX_POINT_BALANCE, points: 0 }
+      throw new Error(`Failed to add card points: ${error.message}`)
+    }
+
+    const row = (data as { points: number; new_balance: number; expires_at: string }[] | null)?.[0]
+    if (!row) return { ok: false, reason: 'unknown_code' }
+    return {
+      ok: true,
+      code: input.code,
+      pointsAdded: row.points,
+      newBalance: row.new_balance,
+      expiresAt: new Date(row.expires_at).getTime(),
+    }
+  }
+
   return withLock(async () => {
     const users = await loadUsers()
     const user = users.find((candidate) => candidate.id === input.userId)
@@ -684,38 +868,40 @@ export async function redeemVoucher(input: {
  * tier shows how much of the printed pool has come back, e.g. 4 / 10 claimed.
  */
 export async function listVoucherBatches(limit = 20): Promise<VoucherBatch[]> {
-  const vouchers = await loadVouchers()
-  const groups = new Map<number, VoucherBatch>()
-  const representatives = new Map<number, { id: string; createdAt: string }>()
+  const facts = await loadAllVouchers()
+  const batches = new Map<string, VoucherBatch>()
 
-  for (const voucher of vouchers) {
-    const group = groups.get(voucher.points) ?? {
-      id: '',
-      points: voucher.points as VoucherTier,
-      createdAt: '',
+  for (const fact of facts) {
+    const batch = batches.get(fact.batch_id) ?? {
+      id: fact.batch_id,
+      points: fact.points as VoucherTier,
+      createdAt: fact.created_at,
       total: 0,
       redeemed: 0,
     }
-    group.total += 1
-    if (voucher.redeemed_at) group.redeemed += 1
-    if (group.createdAt === '' || voucher.created_at > group.createdAt) {
-      group.createdAt = voucher.created_at
-    }
-    const rep = representatives.get(voucher.points)
-    if (!rep || voucher.created_at > rep.createdAt) {
-      representatives.set(voucher.points, { id: voucher.batch_id, createdAt: voucher.created_at })
-    }
-    groups.set(voucher.points, group)
+    batch.total += 1
+    if (fact.redeemed_at) batch.redeemed += 1
+    batches.set(fact.batch_id, batch)
   }
 
-  return [...groups.values()]
-    .map((group) => ({ ...group, id: representatives.get(group.points)?.id ?? '' }))
+  return [...batches.values()]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, limit)
 }
 
 /** The cards of one batch, for printing or reprinting a sheet. */
 export async function listVoucherCards(batchId: string): Promise<VoucherRow[]> {
+  const client = supabase()
+  if (client) {
+    const { data, error } = await client
+      .from('vouchers')
+      .select('*')
+      .eq('batch_id', batchId)
+      .order('code')
+    if (error) throw new Error(`Failed to load cards: ${error.message}`)
+    return (data ?? []) as VoucherRow[]
+  }
+
   const vouchers = await loadVouchers()
   return vouchers
     .filter((voucher) => voucher.batch_id === batchId)
@@ -724,6 +910,17 @@ export async function listVoucherCards(batchId: string): Promise<VoucherRow[]> {
 
 /** Every card of one points denomination, across merged batches, newest first. */
 export async function listVoucherCardsByPoints(points: number): Promise<VoucherRow[]> {
+  const client = supabase()
+  if (client) {
+    const { data, error } = await client
+      .from('vouchers')
+      .select('*')
+      .eq('points', points)
+      .order('created_at', { ascending: false })
+    if (error) throw new Error(`Failed to load cards: ${error.message}`)
+    return (data ?? []) as VoucherRow[]
+  }
+
   const vouchers = await loadVouchers()
   return vouchers
     .filter((voucher) => voucher.points === points)
@@ -741,7 +938,34 @@ export async function createVoucherBatch(input: {
   points: VoucherTier
   quantity: number
 }): Promise<{ batchId: string; cards: VoucherRow[] }> {
+  const batchId = randomUUID()
   const createdAt = new Date().toISOString()
+  const client = supabase()
+
+  if (client) {
+    // Codes carry 32^8 possibilities, so the only realistic failure is a unique
+    // index rejection - clear the half-written batch and mint a fresh set.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const rows = Array.from({ length: input.quantity }, () => ({
+        code: generateVoucherCode(),
+        batch_id: batchId,
+        points: input.points,
+        created_at: createdAt,
+        redeemed_by: null,
+        redeemed_at: null,
+      }))
+
+      const { data, error } = await client.from('vouchers').insert(rows).select('*')
+      if (!error) return { batchId, cards: (data ?? []) as VoucherRow[] }
+
+      if (error.code !== '23505') {
+        throw new Error(`Failed to create cards: ${error.message}`)
+      }
+      await client.from('vouchers').delete().eq('batch_id', batchId)
+    }
+    throw new Error('Failed to create cards')
+  }
+
   return withLock(async () => {
     const vouchers = await loadVouchers()
     const latest = vouchers
@@ -777,6 +1001,19 @@ export async function createVoucherBatch(input: {
 export async function deleteVouchers(codes: string[]): Promise<{ deleted: number }> {
   if (codes.length === 0) return { deleted: 0 }
   const wanted = new Set(codes)
+  const client = supabase()
+
+  if (client) {
+    const { data, error } = await client
+      .from('vouchers')
+      .delete()
+      .in('code', codes)
+      .not('redeemed_at', 'is', null)
+      .select('code')
+    if (error) throw new Error(`Failed to delete cards: ${error.message}`)
+    return { deleted: data?.length ?? 0 }
+  }
+
   return withLock(async () => {
     const vouchers = await loadVouchers()
     let deleted = 0
@@ -801,7 +1038,7 @@ export async function deleteVouchers(codes: string[]): Promise<{ deleted: number
 
 /** Roll-up of one physical-card print run, newest first. */
 export async function listPhysicalCardBatches(): Promise<PhysicalCardBatch[]> {
-  const cards = await loadPhysicalCards()
+  const cards = await loadAllPhysicalCards()
   const groups = new Map<string, PhysicalCardBatch>()
   for (const card of cards) {
     const group = groups.get(card.batch_id) ?? {
@@ -820,6 +1057,17 @@ export async function listPhysicalCardBatches(): Promise<PhysicalCardBatch[]> {
 
 /** Every card of one physical-card print run, for previewing or re-exporting. */
 export async function listPhysicalCardsByBatch(batchId: string): Promise<PhysicalCardRow[]> {
+  const client = supabase()
+  if (client) {
+    const { data, error } = await client
+      .from('physical_cards')
+      .select('*')
+      .eq('batch_id', batchId)
+      .order('kode')
+    if (error) throw new Error(`Failed to load cards: ${error.message}`)
+    return (data ?? []) as PhysicalCardRow[]
+  }
+
   const cards = await loadPhysicalCards()
   return cards
     .filter((card) => card.batch_id === batchId)
@@ -837,6 +1085,40 @@ export async function createPhysicalCardBatch(quantity: number): Promise<{
 }> {
   const createdAt = new Date().toISOString()
   const batchId = randomUUID()
+  const client = supabase()
+
+  if (client) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const taken = new Set<string>()
+      const { data: existing } = await client.from('physical_cards').select('kode')
+      if (existing) existing.forEach((c) => taken.add(c.kode))
+
+      const rows = Array.from({ length: quantity }, () => {
+        let kode: string
+        do {
+          kode = generatePhysicalCardCode(taken)
+        } while (taken.has(kode))
+        taken.add(kode)
+        return {
+          kode,
+          batch_id: batchId,
+          created_at: createdAt,
+          activated_by: null,
+          activated_at: null,
+        }
+      })
+
+      const { data, error } = await client.from('physical_cards').insert(rows).select('*')
+      if (!error) return { batchId, cards: (data ?? []) as PhysicalCardRow[] }
+
+      if (error.code !== '23505') {
+        throw new Error(`Failed to create cards: ${error.message}`)
+      }
+      await client.from('physical_cards').delete().eq('batch_id', batchId)
+    }
+    throw new Error('Failed to create cards')
+  }
+
   return withLock(async () => {
     const cards = await loadPhysicalCards()
     const taken = new Set(cards.map((card) => card.kode))
