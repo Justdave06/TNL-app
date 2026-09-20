@@ -13,5 +13,5 @@
     "resolveJsonModule": true,
     "sourceMap": true
   },
-  "include": ["src", "../src/lib/loyalty.ts", "../src/lib/syncTypes.ts"]
+  "include": ["src/**/*", "../src/lib/loyalty.ts", "../src/lib/syncTypes.ts"]
 }

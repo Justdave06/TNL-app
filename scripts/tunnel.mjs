@@ -11,10 +11,12 @@ import { spawn } from 'node:child_process'
 
 const PORT = process.env.PORT ?? '3000'
 
-const CLOUDFLARED_WIN32 = 'C:\\Program Files (x86)\\cloudflared\\cloudflared.exe'
-const command = process.platform === 'win32' ? CLOUDFLARED_WIN32 : 'cloudflared'
+const command = process.platform === 'win32' ? 'npx' : 'cloudflared'
+const args = process.platform === 'win32'
+  ? ['cloudflared', 'tunnel', '--url', `http://localhost:${PORT}`]
+  : ['tunnel', '--url', `http://localhost:${PORT}`]
 
-const child = spawn(command, ['tunnel', '--url', `http://localhost:${PORT}`], {
+const child = spawn(command, args, {
   stdio: 'inherit',
 })
 

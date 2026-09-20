@@ -1,5 +1,6 @@
 import * as MediaLibrary from 'expo-media-library/legacy'
 import { captureRef } from 'react-native-view-shot'
+import { Platform } from 'react-native'
 
 /**
  * Captures a React Native view as a PNG and saves it to the photo library.
@@ -34,7 +35,19 @@ export async function saveViewAsImage(
     quality: 1,
     result: 'tmpfile',
   })
-  const asset = await MediaLibrary.createAssetAsync(uri)
-  await MediaLibrary.saveToLibraryAsync(asset.uri)
-  return asset.uri
+
+  if (Platform.OS === 'web') {
+    return uri
+  }
+
+  try {
+    const asset = await MediaLibrary.createAssetAsync(uri)
+    await MediaLibrary.saveToLibraryAsync(asset.uri)
+    return asset.uri
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('native module')) {
+      throw new Error('Photo library saving is not available in Expo Go. Create a development build to use this feature.')
+    }
+    throw error
+  }
 }

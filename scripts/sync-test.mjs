@@ -53,11 +53,10 @@ async function api(path, { method = 'GET', cookie, body } = {}) {
   return { status: res.status, headers: res.headers, data, cookie: cookieFrom(res) }
 }
 
-const server = spawn('npx tsx src/index.ts', {
+const server = spawn('npx', ['tsx', 'src/index.ts'], {
   cwd: SERVER_DIR,
   env: { ...process.env, PORT: String(PORT), DATA_DIR, SESSION_SECRET: 'test-secret' },
   stdio: 'ignore',
-  shell: true,
 })
 
 async function waitForBoot() {

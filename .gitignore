@@ -31,7 +31,12 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# tunnel logs with exposed URLs
+tunnel.log
+tunnel-live.log
 
 # typescript
 *.tsbuildinfo
