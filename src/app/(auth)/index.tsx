@@ -91,7 +91,7 @@ export default function AuthScreen() {
                 value={phone}
                 onChangeText={(text) => {
                   setPhone(text.replace(/[^0-9\s]/g, ''))
-                  if (text.replace(/\s/g, '').length >= 10) setTimeout(() => pinRef.current?.focus(), 100)
+                  if (text.replace(/\s/g, '').length === 10) setTimeout(() => pinRef.current?.focus(), 100)
                 }}
                 placeholder="09XX XXX XXXX"
                 placeholderTextColor={colors.textFaint}
