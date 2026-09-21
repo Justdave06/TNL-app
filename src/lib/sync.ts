@@ -220,10 +220,6 @@ async function reconcileResults(userId: string, ops: SyncOp[], results: SyncOpRe
 async function acceptOp(op: SyncOp, result: SyncOpResult): Promise<void> {
   if (op.type === 'register_user') {
     await db.clearUserPendingByOp(op.opId)
-    // The bootstrap register returns a session cookie so the next pull works.
-    if (result.ok && result.state?.authCookie) {
-      await remote.setStoredAuthCookie(result.state.authCookie)
-    }
   } else if (op.type === 'activate_physical_card') {
     await db.clearPhysicalCardPendingByOp(op.opId)
   } else if (op.type === 'spend_awards') {

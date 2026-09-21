@@ -10,7 +10,8 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://alowdgjqnhndzvlrgxsg.supabase.co"
+        "EXPO_PUBLIC_SUPABASE_URL": "https://alowdgjqnhndzvlrgxsg.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "SET_YOUR_ANON_KEY_HERE"
       }
     },
     "production": {
@@ -18,7 +19,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://alowdgjqnhndzvlrgxsg.supabase.co"
+        "EXPO_PUBLIC_SUPABASE_URL": "https://alowdgjqnhndzvlrgxsg.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "SET_YOUR_ANON_KEY_HERE"
       }
     }
   },

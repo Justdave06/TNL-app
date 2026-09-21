@@ -25,7 +25,7 @@ import {
   type VoucherCardsByPointsResponse,
   type VoucherCardsResponse,
 } from './loyalty'
-import { hashPin, verifyPin } from './pin'
+import { verifyPin } from './pin'
 import * as remote from './remote'
 import { readSessionUserId, writeSessionUserId } from './session'
 import * as sync from './sync'
@@ -93,7 +93,7 @@ async function requireAdmin(): Promise<db.UserRow> {
 /* Auth                                                                       */
 /* -------------------------------------------------------------------------- */
 
-async function finishOnlineAuth(auth: remote.AuthBody, phone: string, pin: string): Promise<CurrentUser> {
+async function finishOnlineAuth(auth: remote.AuthBody, phone: string): Promise<CurrentUser> {
   const user = await db.upsertUser({
     id: auth.id,
     phone: auth.phone ?? phone,
@@ -101,11 +101,11 @@ async function finishOnlineAuth(auth: remote.AuthBody, phone: string, pin: strin
     points: auth.points,
     ref_code: auth.ref_code,
     role: auth.role === 'admin' ? 'admin' : 'customer',
-    pin_hash: await hashPin(pin),
+    pin_hash: '',
     pending_op: null,
   })
   await writeSessionUserId(user.id)
-  await remote.setSyncCred(phone, pin)
+  await remote.setSyncCred(phone, '')
   return db.toCurrentUser(user)
 }
 
@@ -120,7 +120,7 @@ export async function login(phone: string, pin: string): Promise<CurrentUser> {
   if (await sync.isOnline()) {
     try {
       const auth = await remote.authorize(cleanPhone, cleanPin)
-      const user = await finishOnlineAuth(auth, cleanPhone, cleanPin)
+      const user = await finishOnlineAuth(auth, cleanPhone)
       void sync.syncNow()
       return user
     } catch (error) {
@@ -163,7 +163,7 @@ export async function register(name: string, phone: string, pin: string): Promis
   if (await sync.isOnline()) {
     try {
       const auth = await remote.registerRemote(cleanName, cleanPhone, cleanPin)
-      const user = await finishOnlineAuth(auth, cleanPhone, cleanPin)
+      const user = await finishOnlineAuth(auth, cleanPhone)
       void sync.syncNow()
       return user
     } catch (error) {
