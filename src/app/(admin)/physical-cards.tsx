@@ -38,11 +38,12 @@ export default function PhysicalCardsScreen() {
   const [loadingPreviewId, setLoadingPreviewId] = React.useState<string | null>(null)
   const [sharing, setSharing] = React.useState(false)
 
+  // Keep all setStates after the first await so loadBatches() never mutates state synchronously.
   const loadBatches = React.useCallback(async () => {
     try {
-      setError(null)
       const data = await api.fetchPhysicalCardBatches()
       setBatches(data.batches)
+      setError(null)
     } catch (err) {
       setError(describeError(err))
     } finally {
@@ -50,8 +51,13 @@ export default function PhysicalCardsScreen() {
     }
   }, [])
 
+  // Mount-time fetch through a nested async fn (react.dev "You Might Not
+  // Need an Effect") so the effect body itself never calls setState.
   React.useEffect(() => {
-    void loadBatches()
+    async function run() {
+      await loadBatches()
+    }
+    void run()
   }, [loadBatches])
 
   async function generate() {

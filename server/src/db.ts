@@ -869,22 +869,31 @@ export async function redeemVoucher(input: {
  */
 export async function listVoucherBatches(limit = 20): Promise<VoucherBatch[]> {
   const facts = await loadAllVouchers()
-  const batches = new Map<string, VoucherBatch>()
+  const groups = new Map<number, VoucherBatch>()
+  const representatives = new Map<number, { id: string; createdAt: string }>()
 
   for (const fact of facts) {
-    const batch = batches.get(fact.batch_id) ?? {
-      id: fact.batch_id,
+    const group = groups.get(fact.points) ?? {
+      id: '',
       points: fact.points as VoucherTier,
-      createdAt: fact.created_at,
+      createdAt: '',
       total: 0,
       redeemed: 0,
     }
-    batch.total += 1
-    if (fact.redeemed_at) batch.redeemed += 1
-    batches.set(fact.batch_id, batch)
+    group.total += 1
+    if (fact.redeemed_at) group.redeemed += 1
+    if (group.createdAt === '' || fact.created_at > group.createdAt) {
+      group.createdAt = fact.created_at
+    }
+    const rep = representatives.get(fact.points)
+    if (!rep || fact.created_at > rep.createdAt) {
+      representatives.set(fact.points, { id: fact.batch_id, createdAt: fact.created_at })
+    }
+    groups.set(fact.points, group)
   }
 
-  return [...batches.values()]
+  return [...groups.values()]
+    .map((group) => ({ ...group, id: representatives.get(group.points)?.id ?? '' }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, limit)
 }

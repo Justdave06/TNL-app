@@ -42,11 +42,12 @@ export default function VouchersScreen() {
   const [removing, setRemoving] = React.useState(false)
   const [sharing, setSharing] = React.useState(false)
 
+  // Keep all setStates after the first await so loadBatches() never mutates state synchronously.
   const loadBatches = React.useCallback(async () => {
     try {
-      setError(null)
       const data = await api.fetchVoucherBatches()
       setBatches(data.batches)
+      setError(null)
     } catch (err) {
       setError(describeError(err))
     } finally {
@@ -66,8 +67,13 @@ export default function VouchersScreen() {
     }
   }, [])
 
+  // Mount-time fetch through a nested async fn (react.dev "You Might Not
+  // Need an Effect") so the effect body itself never calls setState.
   React.useEffect(() => {
-    void loadBatches()
+    async function run() {
+      await loadBatches()
+    }
+    void run()
   }, [loadBatches])
 
   async function generate() {

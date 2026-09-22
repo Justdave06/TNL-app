@@ -17,11 +17,15 @@ import {
   type CreateVoucherBatchResponse,
   type CurrentUser,
   type DeleteVouchersResponse,
+  type PhysicalCardBatch,
   type PhysicalCardBatchCardsResponse,
   type PhysicalCardBatchesResponse,
+  type PhysicalCardEntry,
   type RedeemRewardResponse,
   type RedeemVoucherResponse,
   type VoucherBatchesResponse,
+  type VoucherBatch,
+  type VoucherCardEntry,
   type VoucherCardsByPointsResponse,
   type VoucherCardsResponse,
 } from './loyalty'
@@ -47,6 +51,78 @@ import type { RedeemVoucherOpPayload } from './syncTypes'
 
 /** 9-11 digits starting with 0, e.g. 01012345678. */
 const PHONE_PATTERN = /^0\d{8,10}$/
+
+/* -------------------------------------------------------------------------- */
+/* Catalog response shapes                                                     */
+/* -------------------------------------------------------------------------- */
+/* The Supabase RPCs and tables return snake_case rows while the UI types are  */
+/* camelCase, so each admin response is normalised here before it reaches the  */
+/* screens. This also guards against a malformed body (e.g. missing `cards`).  */
+
+interface RawVoucherBatch {
+  id: string
+  points: number
+  created_at: string
+  total: number
+  redeemed: number
+}
+
+interface RawVoucherCard {
+  code: string
+  points: number
+  redeemed_at: string | null
+}
+
+interface RawVoucherRow extends RawVoucherCard {
+  batch_id: string
+  created_at: string
+  redeemed_by: string | null
+}
+
+interface RawPhysicalCardBatch {
+  id: string
+  created_at: string
+  total: number
+  activated: number
+}
+
+interface RawPhysicalCard {
+  kode: string
+  code?: string
+  created_at: string
+  activated_at: string | null
+}
+
+function toVoucherBatch(raw: RawVoucherBatch): VoucherBatch {
+  return {
+    id: raw.id,
+    points: raw.points as VoucherBatch['points'],
+    createdAt: raw.created_at,
+    total: raw.total,
+    redeemed: raw.redeemed,
+  }
+}
+
+function toVoucherCard(card: RawVoucherCard): VoucherCardEntry {
+  return { code: card.code, points: card.points, redeemedAt: card.redeemed_at ?? null }
+}
+
+function toPhysicalCardBatch(raw: RawPhysicalCardBatch): PhysicalCardBatch {
+  return {
+    id: raw.id,
+    createdAt: raw.created_at,
+    total: raw.total,
+    activated: raw.activated,
+  }
+}
+
+function toPhysicalCard(card: RawPhysicalCard): PhysicalCardEntry {
+  return {
+    code: card.kode ?? card.code,
+    createdAt: card.created_at,
+    activatedAt: card.activated_at ?? null,
+  }
+}
 
 export class ApiError extends Error {
   readonly status: number
@@ -272,7 +348,10 @@ export async function activatePhysicalCard(code: string): Promise<ActivatePhysic
   if (await sync.isOnline()) {
     try {
       const response = (await remote.postActivate(kode)) as ActivatePhysicalCardResponse
-      void sync.syncNow()
+      // Pull the activated card into the cache before returning, so the card
+      // screen's refresh() sees hasPhysicalCard immediately instead of racing
+      // the background sync (which the UI has no other trigger to await).
+      await sync.syncNow()
       return response
     } catch (error) {
       if (error instanceof remote.RemoteError) {
@@ -430,9 +509,17 @@ export async function createVoucherBatch(
   await ensureOnlineCatalog()
 
   try {
-    const response = (await remote.postAdmin('/vouchers', { points, quantity })) as CreateVoucherBatchResponse
+    const response = (await remote.postAdmin('/vouchers', { points, quantity })) as {
+      success: boolean
+      batch: RawVoucherBatch
+      cards: RawVoucherCard[]
+    }
     void sync.syncNow()
-    return response
+    return {
+      success: true,
+      batch: toVoucherBatch(response.batch),
+      cards: Array.isArray(response.cards) ? response.cards.map(toVoucherCard) : [],
+    }
   } catch (error) {
     throw toApiError(error, 'You need an internet connection to mint new cards')
   }
@@ -443,9 +530,9 @@ export async function fetchVoucherBatches(): Promise<VoucherBatchesResponse> {
   await ensureOnlineCatalog()
 
   try {
-    const response = (await remote.getAdmin('/vouchers')) as VoucherBatchesResponse
+    const response = (await remote.getAdmin('/vouchers')) as { batches?: RawVoucherBatch[] }
     void sync.syncNow()
-    return response
+    return { batches: Array.isArray(response.batches) ? response.batches.map(toVoucherBatch) : [] }
   } catch (error) {
     throw toApiError(error, 'You need an internet connection to view the catalog')
   }
@@ -464,9 +551,12 @@ export async function fetchVoucherCardsByPoints(
   try {
     const response = (await remote.getAdmin(
       `/vouchers/cards-by-points?points=${encodeURIComponent(points)}`,
-    )) as VoucherCardsByPointsResponse
+    )) as { points?: number; cards?: RawVoucherCard[] }
     void sync.syncNow()
-    return response
+    return {
+      points: typeof response.points === 'number' ? response.points : points,
+      cards: Array.isArray(response.cards) ? response.cards.map(toVoucherCard) : [],
+    }
   } catch (error) {
     throw toApiError(error, 'You need an internet connection to view the catalog')
   }
@@ -477,9 +567,16 @@ export async function fetchVoucherCards(batchId: string): Promise<VoucherCardsRe
   await ensureOnlineCatalog()
 
   try {
-    const response = (await remote.getAdmin(`/vouchers/${encodeURIComponent(batchId)}`)) as VoucherCardsResponse
+    const rows = (await remote.getAdmin(`/vouchers/${encodeURIComponent(batchId)}`)) as
+      | RawVoucherRow[]
+      | null
     void sync.syncNow()
-    return response
+    return {
+      batchId,
+      cards: Array.isArray(rows)
+        ? rows.map((row) => toVoucherCard({ code: row.code, points: row.points, redeemed_at: row.redeemed_at }))
+        : [],
+    }
   } catch (error) {
     throw toApiError(error, 'You need an internet connection to view the catalog')
   }
@@ -498,9 +595,15 @@ export async function deleteClaimedVouchers(codes: string[]): Promise<DeleteVouc
   await ensureOnlineCatalog()
 
   try {
-    const response = (await remote.postAdmin('/vouchers/delete', { codes: normalized })) as DeleteVouchersResponse
+    const response = (await remote.postAdmin('/vouchers/delete', { codes: normalized })) as {
+      success?: boolean
+      deleted?: number
+    }
     void sync.syncNow()
-    return response
+    return {
+      success: true,
+      deleted: typeof response.deleted === 'number' ? response.deleted : 0,
+    }
   } catch (error) {
     throw toApiError(error, 'You need an internet connection to manage the catalog')
   }
@@ -517,9 +620,17 @@ export async function createPhysicalCardBatch(
   await ensureOnlineCatalog()
 
   try {
-    const response = (await remote.postAdmin('/physical-cards', { quantity })) as CreatePhysicalCardsResponse
+    const response = (await remote.postAdmin('/physical-cards', { quantity })) as {
+      success: boolean
+      batch: RawPhysicalCardBatch
+      cards: RawPhysicalCard[]
+    }
     void sync.syncNow()
-    return response
+    return {
+      success: true,
+      batch: toPhysicalCardBatch(response.batch),
+      cards: Array.isArray(response.cards) ? response.cards.map(toPhysicalCard) : [],
+    }
   } catch (error) {
     throw toApiError(error, 'You need an internet connection to mint new cards')
   }
@@ -530,9 +641,9 @@ export async function fetchPhysicalCardBatches(): Promise<PhysicalCardBatchesRes
   await ensureOnlineCatalog()
 
   try {
-    const response = (await remote.getAdmin('/physical-cards')) as PhysicalCardBatchesResponse
+    const response = (await remote.getAdmin('/physical-cards')) as { batches?: RawPhysicalCardBatch[] }
     void sync.syncNow()
-    return response
+    return { batches: Array.isArray(response.batches) ? response.batches.map(toPhysicalCardBatch) : [] }
   } catch (error) {
     throw toApiError(error, 'You need an internet connection to view the catalog')
   }
@@ -545,11 +656,14 @@ export async function fetchPhysicalCardCards(
   await ensureOnlineCatalog()
 
   try {
-    const response = (await remote.getAdmin(
+    const rows = (await remote.getAdmin(
       `/physical-cards/${encodeURIComponent(batchId)}`,
-    )) as PhysicalCardBatchCardsResponse
+    )) as RawPhysicalCard[] | null
     void sync.syncNow()
-    return response
+    return {
+      batchId,
+      cards: Array.isArray(rows) ? rows.map(toPhysicalCard) : [],
+    }
   } catch (error) {
     throw toApiError(error, 'You need an internet connection to view the catalog')
   }

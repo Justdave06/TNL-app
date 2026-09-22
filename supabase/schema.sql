@@ -531,10 +531,11 @@ begin
   end if;
 
   select coalesce(
-    (select jsonb_agg(jsonb_build_object('code', code, 'points', points, 'redeemed_at', redeemed_at))
+    (select jsonb_agg(
+              jsonb_build_object('code', code, 'points', points, 'redeemed_at', redeemed_at)
+              order by created_at desc)
      from public.vouchers
-     where vouchers.points = p_points
-     order by created_at desc),
+     where vouchers.points = p_points),
     '[]'::jsonb
   ) into v_result;
 
@@ -809,7 +810,10 @@ begin
     select coalesce(jsonb_agg(to_jsonb(a)), '[]'::jsonb) into v_awards
       from public.point_awards a where a.user_id = p_user_id;
     select '[]'::jsonb into v_vouchers;
-    select '[]'::jsonb into v_cards;
+    -- Customers pull the cards they activated, so hasPhysicalCard survives a
+    -- sync pull (the standalone server scopes the same way in server/src/db.ts).
+    select coalesce(jsonb_agg(to_jsonb(c)), '[]'::jsonb) into v_cards
+      from public.physical_cards c where c.activated_by = p_user_id;
   end if;
 
   return jsonb_build_object(
@@ -850,23 +854,37 @@ as $$
 declare
   v_batches jsonb;
 begin
+  -- One roll-up per denomination (tier), not per batch: the UI keys and expands
+  -- cards by tier. `id` is the representative batch - the most recent run of
+  -- that tier - matching the offline implementation in src/lib/db.ts.
+  -- Ordering lives inside the aggregate: an outer ORDER BY on a non-grouped
+  -- column alongside jsonb_agg fails with "must appear in the GROUP BY clause".
   select coalesce(
-    jsonb_agg(jsonb_build_object(
-      'id', batch_id,
-      'points', points,
-      'created_at', created_at,
-      'total', total,
-      'redeemed', redeemed
-    ))::jsonb,
+    jsonb_agg(
+      jsonb_build_object(
+        'id', t.batch_id,
+        'points', t.points,
+        'created_at', t.created_at,
+        'total', t.total,
+        'redeemed', t.redeemed
+      )
+      order by t.created_at desc
+    )::jsonb,
     '[]'::jsonb
   ) into v_batches
   from (
-    select batch_id, points, created_at, count(*) as total,
-           count(nullif(redeemed_at, null)) as redeemed
-    from public.vouchers
-    group by batch_id, points, created_at
-    order by created_at desc
-    limit 20
+    select rep.batch_id, rep.points, rep.created_at, tot.total, tot.redeemed
+    from (
+      select distinct on (points) points, batch_id, created_at
+      from public.vouchers
+      order by points, created_at desc
+    ) rep
+    join (
+      select points, count(*) as total,
+             count(nullif(redeemed_at, null)) as redeemed
+      from public.vouchers
+      group by points
+    ) tot on tot.points = rep.points
   ) t;
 
   return jsonb_build_object('batches', v_batches);

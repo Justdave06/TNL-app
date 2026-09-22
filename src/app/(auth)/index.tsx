@@ -1,6 +1,15 @@
 import { LinearGradient } from 'expo-linear-gradient'
 import { Image } from 'expo-image'
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native'
 import { useAuth } from '@/lib/auth'
 import { describeError } from '@/lib/errors'
 import { colors, spacing } from '@/lib/theme'
@@ -52,8 +61,15 @@ export default function AuthScreen() {
   }
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.wrap}>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView
+        contentContainerStyle={styles.wrap}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <Image source={require('@/assets/images/logo.png')} style={styles.logo} contentFit="contain" />
 
         <Text style={styles.heading}>The Noodle Line</Text>
@@ -90,8 +106,9 @@ export default function AuthScreen() {
                 ref={phoneRef}
                 value={phone}
                 onChangeText={(text) => {
-                  setPhone(text.replace(/[^0-9\s]/g, ''))
-                  if (text.replace(/\s/g, '').length === 10) setTimeout(() => pinRef.current?.focus(), 100)
+                  const cleaned = text.replace(/[^0-9\s]/g, '')
+                  if (cleaned.replace(/\s/g, '').length > 11) return
+                  setPhone(cleaned)
                 }}
                 placeholder="09XX XXX XXXX"
                 placeholderTextColor={colors.textFaint}
@@ -159,14 +176,14 @@ export default function AuthScreen() {
         </View>
 
         <Text style={styles.footer}>© {new Date().getFullYear()} The Noodle Line. All rights reserved.</Text>
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   )
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  wrap: { flex: 1, justifyContent: 'center', padding: spacing.lg },
+  wrap: { flexGrow: 1, justifyContent: 'center', padding: spacing.lg },
   logo: { width: 48, height: 48, alignSelf: 'center', marginBottom: spacing.lg },
   heading: { color: colors.text, fontSize: 26, fontWeight: '800', textAlign: 'center', marginBottom: spacing.xl },
   card: {

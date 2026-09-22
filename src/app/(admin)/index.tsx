@@ -3,7 +3,6 @@ import { Link } from 'expo-router'
 import * as React from 'react'
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import * as api from '@/lib/api'
-import { useAuth } from '@/lib/auth'
 import { describeError } from '@/lib/errors'
 import { colors, spacing } from '@/lib/theme'
 import { Card } from '@/components/ui'
@@ -21,23 +20,27 @@ const SHORTCUTS: Shortcut[] = [
 ]
 
 export default function AdminOverviewScreen() {
-  const { user } = useAuth()
-
   const [count, setCount] = React.useState<number | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [refreshing, setRefreshing] = React.useState(false)
 
+  // Keep all setStates after the first await so load() never mutates state synchronously.
   const load = React.useCallback(async () => {
     try {
-      setError(null)
       setCount(await api.fetchCustomerCount())
+      setError(null)
     } catch (err) {
       setError(describeError(err))
     }
   }, [])
 
+  // Mount-time fetch through a nested async fn (react.dev "You Might Not
+  // Need an Effect") so the effect body itself never calls setState.
   React.useEffect(() => {
-    void load()
+    async function run() {
+      await load()
+    }
+    void run()
   }, [load])
 
   function handleRefresh() {

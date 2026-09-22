@@ -1,10 +1,8 @@
 import { Ionicons } from '@expo/vector-icons'
-import { LinearGradient } from 'expo-linear-gradient'
-import { Image } from 'expo-image'
 import * as React from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
-import QRCode from 'react-native-qrcode-svg'
 import QrCamera from '@/components/qr-scanner'
+import FlipCard from '@/components/flip-card'
 import { PrimaryButton, OutlineButton, Pill, Card } from '@/components/ui'
 import * as api from '@/lib/api'
 import { useAuth } from '@/lib/auth'
@@ -229,42 +227,13 @@ export default function CardScreen() {
       ) : (
         <>
           <View ref={cardRef} collapsable={false}>
-            {flipped ? (
-              <LinearGradient
-                colors={['#1c1917', '#0c0a09', '#000000']}
-                style={styles.cardArt}
-              >
-                <Image
-                  source={require('@/assets/images/logo.png')}
-                  style={styles.watermark}
-                  contentFit="contain"
-                />
-                <View style={styles.backNameRow}>
-                  <Text style={styles.memberName} numberOfLines={1}>
-                    {user.name}
-                  </Text>
-                </View>
-              </LinearGradient>
-            ) : (
-              <LinearGradient
-                colors={['#1c1917', '#0c0a09', '#000000']}
-                style={styles.cardArt}
-              >
-                <View style={styles.noodleA} />
-                <View style={styles.noodleB} />
-                <View style={styles.brandLockup}>
-                  <Image source={require('@/assets/images/logo.png')} style={styles.logo} contentFit="contain" />
-                  <Text style={styles.brandThe}>The</Text>
-                  <Text style={styles.brandLine}>Noodle</Text>
-                  <Text style={styles.brandLine}>Line</Text>
-                </View>
-                {qrPayload ? (
-                  <View style={styles.qrFrame}>
-                    <QRCode value={qrPayload} size={88} color="#ffffff" backgroundColor="transparent" />
-                  </View>
-                ) : null}
-              </LinearGradient>
-            )}
+            {/* Tap the card itself to flip; the button below shares this state. */}
+            <FlipCard
+              qrPayload={qrPayload}
+              memberName={user.name}
+              flipped={flipped}
+              onToggleFlipped={() => setFlipped((f) => !f)}
+            />
           </View>
 
           <View style={styles.cardActions}>
