@@ -1,9 +1,6 @@
-import { Ionicons } from '@expo/vector-icons'
-import * as React from 'react'
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
-import QrCamera from '@/components/qr-scanner'
 import FlipCard from '@/components/flip-card'
-import { PrimaryButton, OutlineButton, Pill, Card } from '@/components/ui'
+import QrCamera from '@/components/qr-scanner'
+import { Card, OutlineButton, Pill, PrimaryButton } from '@/components/ui'
 import * as api from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { saveViewAsImage } from '@/lib/capture'
@@ -15,6 +12,9 @@ import {
 } from '@/lib/loyalty'
 import { colors, spacing } from '@/lib/theme'
 import { useToast } from '@/lib/toast'
+import { Ionicons } from '@expo/vector-icons'
+import * as React from 'react'
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 
 /** Ignore repeat decodes of the same code for this long. */
 const DUPLICATE_WINDOW_MS = 5000
@@ -66,6 +66,7 @@ export default function CardScreen() {
   const [justActivated, setJustActivated] = React.useState<string | null>(null)
   const [showManualEntry, setShowManualEntry] = React.useState(false)
   const [manualKode, setManualKode] = React.useState('')
+
 
   /* ------------------------------ Card art -------------------------------- */
   const [flipped, setFlipped] = React.useState(false)

@@ -14,6 +14,8 @@ import {
   type CreatePhysicalCardsResponse,
   type CreateVoucherBatchResponse,
   type CurrentUser,
+  type DeletePhysicalBatchResponse,
+  type DeleteVoucherTierResponse,
   type DeleteVouchersResponse,
   type PhysicalCardBatchCardsResponse,
   type PhysicalCardBatchesResponse,
@@ -33,6 +35,8 @@ import {
   createCustomer,
   createPhysicalCardBatch,
   createVoucherBatch,
+  deleteUnactivatedPhysicalCardsByBatch,
+  deleteUnclaimedVouchersByTier,
   deleteVouchers,
   getUserByPhone,
   listPhysicalCardBatches,
@@ -97,6 +101,16 @@ interface CreatePhysicalCardsBody {
 interface DeleteVouchersBody {
   /** The kodes to remove - must all be claimed cards. */
   codes?: string[]
+}
+
+interface DeleteVoucherTierBody {
+  /** The denomination whose unclaimed cards should be removed. */
+  points?: number
+}
+
+interface DeletePhysicalBatchBody {
+  /** The batch whose unactivated cards should be removed. */
+  batchId?: string
 }
 
 interface SyncPushBody {
@@ -475,6 +489,44 @@ app.post('/api/admin/vouchers/delete', async (req: Request, res: Response): Prom
 
   const { deleted } = await deleteVouchers(codes)
   const response: DeleteVouchersResponse = { success: true, deleted }
+  res.json(response)
+})
+
+/**
+ * POST /api/admin/vouchers/delete-tier
+ * Retracts an accidentally printed pool: removes every unclaimed card of one
+ * denomination. Claimed cards (points customers hold) are never touched.
+ */
+app.post('/api/admin/vouchers/delete-tier', async (req: Request, res: Response): Promise<void> => {
+  await requireAdmin(req)
+
+  const body = (req.body ?? {}) as DeleteVoucherTierBody
+  const points = Number(body.points)
+  if (!isVoucherTier(points)) {
+    throw httpError(400, 'Invalid points value')
+  }
+
+  const { deleted } = await deleteUnclaimedVouchersByTier(points)
+  const response: DeleteVoucherTierResponse = { success: true, deleted }
+  res.json(response)
+})
+
+/**
+ * POST /api/admin/physical-cards/delete-batch
+ * Retracts an accidentally printed batch: removes every unactivated card.
+ * Activated cards (linked to customer accounts) are never touched.
+ */
+app.post('/api/admin/physical-cards/delete-batch', async (req: Request, res: Response): Promise<void> => {
+  await requireAdmin(req)
+
+  const body = (req.body ?? {}) as DeletePhysicalBatchBody
+  const batchId = String(body.batchId ?? '')
+  if (!batchId) {
+    throw httpError(400, 'A batch id is required')
+  }
+
+  const { deleted } = await deleteUnactivatedPhysicalCardsByBatch(batchId)
+  const response: DeletePhysicalBatchResponse = { success: true, deleted }
   res.json(response)
 })
 

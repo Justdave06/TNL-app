@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons'
 import * as React from 'react'
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   Pressable,
   ScrollView,
@@ -14,9 +15,9 @@ import * as api from '@/lib/api'
 import { buildPhysicalCardSheets, type PhysicalCardSheet } from '@/lib/card-art'
 import { describeError } from '@/lib/errors'
 import { MAX_PHYSICAL_BATCH_SIZE, type PhysicalCardBatch } from '@/lib/loyalty'
+import { useToast } from '@/lib/toast'
 import { sharePdf } from '@/lib/sheet'
 import { colors, spacing } from '@/lib/theme'
-import { useToast } from '@/lib/toast'
 import { Card, ErrorText, Field, Pill, PrimaryButton } from '@/components/ui'
 
 interface SheetState extends PhysicalCardSheet {
@@ -37,6 +38,7 @@ export default function PhysicalCardsScreen() {
   const [sheet, setSheet] = React.useState<SheetState | null>(null)
   const [loadingPreviewId, setLoadingPreviewId] = React.useState<string | null>(null)
   const [sharing, setSharing] = React.useState(false)
+  const [deletingBatchId, setDeletingBatchId] = React.useState<string | null>(null)
 
   // Keep all setStates after the first await so loadBatches() never mutates state synchronously.
   const loadBatches = React.useCallback(async () => {
@@ -80,6 +82,44 @@ export default function PhysicalCardsScreen() {
       setError(describeError(err))
     } finally {
       setGenerating(false)
+    }
+  }
+
+  /** Retracts an accidentally printed batch: deletes its unactivated cards. */
+  function confirmDeleteBatch(batch: PhysicalCardBatch) {
+    const unactivated = batch.total - batch.activated
+    Alert.alert(
+      'Delete print run',
+      unactivated > 0
+        ? `Delete the ${unactivated} unactivated card${unactivated === 1 ? '' : 's'} of this run? Activated cards are kept. This cannot be undone.`
+        : 'All cards of this run are already activated, so there is nothing to delete.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        ...(unactivated > 0
+          ? [
+              {
+                text: 'Delete',
+                style: 'destructive' as const,
+                onPress: () => void deleteBatch(batch.id),
+              },
+            ]
+          : []),
+      ],
+    )
+  }
+
+  async function deleteBatch(batchId: string) {
+    if (deletingBatchId) return
+    setDeletingBatchId(batchId)
+    setError(null)
+    try {
+      const result = await api.deleteUnactivatedPhysicalBatch(batchId)
+      push(`${result.deleted} unactivated card${result.deleted === 1 ? '' : 's'} deleted`, 'success')
+      await loadBatches()
+    } catch (err) {
+      setError(describeError(err))
+    } finally {
+      setDeletingBatchId(null)
     }
   }
 
@@ -197,20 +237,42 @@ export default function PhysicalCardsScreen() {
               </Text>
               <Pill>Non-expiry</Pill>
             </View>
-            <Pressable
-              onPress={() => openPreview(batch.id)}
-              disabled={loadingPreviewId === batch.id}
-              style={({ pressed }) => [styles.viewBtn, pressed && { opacity: 0.85 }]}
-            >
-              {loadingPreviewId === batch.id ? (
-                <ActivityIndicator color={colors.textMuted} size="small" />
-              ) : (
-                <>
-                  <Ionicons name="eye-outline" size={16} color={colors.textMuted} />
-                  <Text style={styles.viewBtnText}>Preview PDF</Text>
-                </>
-              )}
-            </Pressable>
+            <View style={styles.batchActions}>
+              <Pressable
+                onPress={() => openPreview(batch.id)}
+                disabled={loadingPreviewId === batch.id}
+                style={({ pressed }) => [styles.viewBtn, pressed && { opacity: 0.85 }]}
+              >
+                {loadingPreviewId === batch.id ? (
+                  <ActivityIndicator color={colors.textMuted} size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="eye-outline" size={16} color={colors.textMuted} />
+                    <Text style={styles.viewBtnText}>Preview PDF</Text>
+                  </>
+                )}
+              </Pressable>
+              {batch.activated < batch.total ? (
+                <Pressable
+                  onPress={() => confirmDeleteBatch(batch)}
+                  disabled={deletingBatchId === batch.id}
+                  style={({ pressed }) => [
+                    styles.deleteBtn,
+                    deletingBatchId === batch.id && styles.disabled,
+                    pressed && { opacity: 0.85 },
+                  ]}
+                >
+                  {deletingBatchId === batch.id ? (
+                    <ActivityIndicator color="#fca5a5" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="trash-outline" size={16} color="#fca5a5" />
+                      <Text style={styles.deleteBtnText}>Delete</Text>
+                    </>
+                  )}
+                </Pressable>
+              ) : null}
+            </View>
           </Card>
         ))
       )}
@@ -273,4 +335,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   viewBtnText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+  batchActions: { gap: spacing.sm, alignItems: 'flex-end' },
+  deleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    minWidth: 118,
+    justifyContent: 'center',
+  },
+  deleteBtnText: { color: '#fca5a5', fontSize: 13, fontWeight: '600' },
+  disabled: { opacity: 0.45 },
 })

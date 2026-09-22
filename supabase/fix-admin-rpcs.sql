@@ -18,6 +18,9 @@
 --      sync pull deleted the locally-activated card and hasPhysicalCard
 --      stayed false - the My TNL Card screen never showed the card after
 --      activation. Customers now pull the cards they activated.
+--   5. New: batch deletion for accidentally printed runs. Vouchers can be
+--      removed per denomination (unclaimed only); physical cards per batch
+--      (unactivated only). Claimed/activated cards are never touched.
 -- ================================================================
 
 create or replace function public.get_voucher_cards_by_points(p_points integer)
@@ -246,5 +249,63 @@ begin
     'vouchers', v_vouchers,
     'physicalCards', v_cards
   );
+end;
+$$;
+
+-- ================================================================
+-- RPC: Delete unclaimed vouchers of one denomination (admin only)
+-- Removes accidentally printed cards. Claimed cards are kept - they
+-- are the audit trail for points already awarded to customers.
+-- ================================================================
+create or replace function public.delete_unclaimed_vouchers(p_points integer)
+returns jsonb
+language plpgsql
+security definer
+as $$
+declare
+  v_deleted integer;
+begin
+  if p_points not in (1, 2, 3) then
+    raise exception 'Invalid points value';
+  end if;
+
+  with removed as (
+    delete from public.vouchers
+     where points = p_points
+       and redeemed_at is null
+    returning code
+  )
+  select count(*) into v_deleted from removed;
+
+  return jsonb_build_object('success', true, 'deleted', v_deleted);
+end;
+$$;
+
+-- ================================================================
+-- RPC: Delete unactivated physical cards of one batch (admin only)
+-- Removes accidentally printed batches. Activated cards are kept -
+-- they are linked to customer accounts.
+-- ================================================================
+create or replace function public.delete_unactivated_physical_cards(p_batch_id uuid)
+returns jsonb
+language plpgsql
+security definer
+as $$
+declare
+  v_deleted integer;
+begin
+  if p_batch_id is null then
+    raise exception 'A batch id is required';
+  end if;
+
+  with removed as (
+    delete from public.physical_cards
+     where batch_id = p_batch_id
+       and activated_at is null
+    returning kode
+  )
+  select count(*) into v_deleted from removed;
+
+  return jsonb_build_object('success', true, 'deleted', v_deleted);
 end;
 $$;

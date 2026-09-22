@@ -1045,6 +1045,81 @@ export async function deleteVouchers(codes: string[]): Promise<{ deleted: number
   })
 }
 
+/**
+ * Removes every still-unclaimed voucher of one denomination (retracting an
+ * accidentally printed pool). Claimed cards are kept - they back points
+ * customers already hold.
+ */
+export async function deleteUnclaimedVouchersByTier(points: number): Promise<{ deleted: number }> {
+  const client = supabase()
+
+  if (client) {
+    const { data, error } = await client
+      .from('vouchers')
+      .delete()
+      .eq('points', points)
+      .is('redeemed_at', null)
+      .select('code')
+    if (error) throw new Error(`Failed to delete cards: ${error.message}`)
+    return { deleted: data?.length ?? 0 }
+  }
+
+  return withLock(async () => {
+    const vouchers = await loadVouchers()
+    let deleted = 0
+    const kept: VoucherRow[] = []
+    for (const voucher of vouchers) {
+      if (voucher.points === points && !voucher.redeemed_at) {
+        deleted += 1
+        continue
+      }
+      kept.push(voucher)
+    }
+    if (deleted > 0) {
+      voucherCache = kept
+      await persistVouchers(kept)
+    }
+    return { deleted }
+  })
+}
+
+/**
+ * Removes every still-unactivated physical card of one batch. Activated
+ * cards stay - they are linked to customer accounts.
+ */
+export async function deleteUnactivatedPhysicalCardsByBatch(batchId: string): Promise<{ deleted: number }> {
+  const client = supabase()
+
+  if (client) {
+    const { data, error } = await client
+      .from('physical_cards')
+      .delete()
+      .eq('batch_id', batchId)
+      .is('activated_at', null)
+      .select('kode')
+    if (error) throw new Error(`Failed to delete cards: ${error.message}`)
+    return { deleted: data?.length ?? 0 }
+  }
+
+  return withLock(async () => {
+    const cards = await loadPhysicalCards()
+    let deleted = 0
+    const kept: PhysicalCardRow[] = []
+    for (const card of cards) {
+      if (card.batch_id === batchId && !card.activated_at) {
+        deleted += 1
+        continue
+      }
+      kept.push(card)
+    }
+    if (deleted > 0) {
+      physicalCardCache = kept
+      await persistPhysicalCards(kept)
+    }
+    return { deleted }
+  })
+}
+
 /** Roll-up of one physical-card print run, newest first. */
 export async function listPhysicalCardBatches(): Promise<PhysicalCardBatch[]> {
   const cards = await loadAllPhysicalCards()

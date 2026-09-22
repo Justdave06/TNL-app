@@ -337,6 +337,18 @@ export interface DeleteVouchersResponse {
   deleted: number
 }
 
+/** Result of removing every unclaimed card of one voucher denomination. */
+export interface DeleteVoucherTierResponse {
+  success: true
+  deleted: number
+}
+
+/** Result of removing every unactivated card of one physical-card batch. */
+export interface DeletePhysicalBatchResponse {
+  success: true
+  deleted: number
+}
+
 export interface CreatePhysicalCardsResponse {
   success: true
   batch: PhysicalCardBatch

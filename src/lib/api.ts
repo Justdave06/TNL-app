@@ -16,6 +16,8 @@ import {
   type CreatePhysicalCardsResponse,
   type CreateVoucherBatchResponse,
   type CurrentUser,
+  type DeletePhysicalBatchResponse,
+  type DeleteVoucherTierResponse,
   type DeleteVouchersResponse,
   type PhysicalCardBatch,
   type PhysicalCardBatchCardsResponse,
@@ -596,6 +598,61 @@ export async function deleteClaimedVouchers(codes: string[]): Promise<DeleteVouc
 
   try {
     const response = (await remote.postAdmin('/vouchers/delete', { codes: normalized })) as {
+      success?: boolean
+      deleted?: number
+    }
+    void sync.syncNow()
+    return {
+      success: true,
+      deleted: typeof response.deleted === 'number' ? response.deleted : 0,
+    }
+  } catch (error) {
+    throw toApiError(error, 'You need an internet connection to manage the catalog')
+  }
+}
+
+/**
+ * Removes every still-unclaimed card of one voucher denomination (a printed
+ * pool the admin wants to retract). Claimed cards are never touched - they
+ * are the audit trail for points customers already hold.
+ */
+export async function deleteUnclaimedVoucherTier(points: number): Promise<DeleteVoucherTierResponse> {
+  await requireAdmin()
+
+  if (!isVoucherTier(points)) {
+    throw new ApiError(400, 'Invalid points value')
+  }
+  await ensureOnlineCatalog()
+
+  try {
+    const response = (await remote.postAdmin('/vouchers/delete-tier', { points })) as {
+      success?: boolean
+      deleted?: number
+    }
+    void sync.syncNow()
+    return {
+      success: true,
+      deleted: typeof response.deleted === 'number' ? response.deleted : 0,
+    }
+  } catch (error) {
+    throw toApiError(error, 'You need an internet connection to manage the catalog')
+  }
+}
+
+/**
+ * Removes every still-unactivated card of one physical-card batch. Activated
+ * cards stay - they are linked to customer accounts.
+ */
+export async function deleteUnactivatedPhysicalBatch(batchId: string): Promise<DeletePhysicalBatchResponse> {
+  await requireAdmin()
+
+  if (!batchId) {
+    throw new ApiError(400, 'A batch id is required')
+  }
+  await ensureOnlineCatalog()
+
+  try {
+    const response = (await remote.postAdmin('/physical-cards/delete-batch', { batchId })) as {
       success?: boolean
       deleted?: number
     }

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons'
 import * as React from 'react'
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   Pressable,
   ScrollView,
@@ -40,6 +41,7 @@ export default function VouchersScreen() {
   const [loadingCards, setLoadingCards] = React.useState(false)
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [removing, setRemoving] = React.useState(false)
+  const [deletingPool, setDeletingPool] = React.useState(false)
   const [sharing, setSharing] = React.useState(false)
 
   // Keep all setStates after the first await so loadBatches() never mutates state synchronously.
@@ -134,6 +136,44 @@ export default function VouchersScreen() {
       setError(describeError(err))
     } finally {
       setRemoving(false)
+    }
+  }
+
+  /** Retracts an accidentally printed pool: deletes all unclaimed cards of the tier. */
+  function confirmDeletePool(points: VoucherTier) {
+    const list = cards[points] ?? []
+    const unclaimed = list.filter((card) => !card.redeemedAt).length
+    Alert.alert(
+      'Delete card pool',
+      unclaimed > 0
+        ? `Delete all ${unclaimed} unclaimed ${points}-point card${unclaimed === 1 ? '' : 's'}? Claimed cards are kept. This cannot be undone.`
+        : `Delete the remaining unclaimed ${points}-point cards? Claimed cards are kept. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => void deletePool(points),
+        },
+      ],
+    )
+  }
+
+  async function deletePool(points: VoucherTier) {
+    if (deletingPool) return
+    setDeletingPool(true)
+    setError(null)
+    try {
+      const result = await api.deleteUnclaimedVoucherTier(points)
+      push(`${result.deleted} unclaimed card${result.deleted === 1 ? '' : 's'} deleted`, 'success')
+      setSelected(new Set())
+      setCards((prev) => ({ ...prev, [points]: [] }))
+      setExpanded(null)
+      await loadBatches()
+    } catch (err) {
+      setError(describeError(err))
+    } finally {
+      setDeletingPool(false)
     }
   }
 
@@ -269,6 +309,21 @@ export default function VouchersScreen() {
                         </Pressable>
                       </View>
 
+                      <Pressable
+                        onPress={() => confirmDeletePool(batch.points)}
+                        disabled={deletingPool}
+                        style={({ pressed }) => [
+                          styles.deletePoolBtn,
+                          deletingPool && styles.disabled,
+                          pressed && { opacity: 0.85 },
+                        ]}
+                      >
+                        <Ionicons name="trash-outline" size={16} color="#fca5a5" />
+                        <Text style={styles.deletePoolText}>
+                          {deletingPool ? 'Deleting…' : 'Delete pool (unclaimed only)'}
+                        </Text>
+                      </Pressable>
+
                       {list.map((card) => {
                         const claimed = card.redeemedAt != null
                         const checked = selected.has(card.code)
@@ -371,6 +426,17 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   removeBtnText: { color: '#fca5a5', fontSize: 13, fontWeight: '700' },
+  deletePoolBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+    borderRadius: 10,
+    paddingVertical: 9,
+  },
+  deletePoolText: { color: '#fca5a5', fontSize: 13, fontWeight: '700' },
   disabled: { opacity: 0.45 },
   codeRow: {
     flexDirection: 'row',

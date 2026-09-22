@@ -231,6 +231,16 @@ export async function postAdmin(path: string, body: unknown): Promise<unknown> {
     const { data, error } = await supabase.rpc('delete_claimed_vouchers', { p_codes: b.codes })
     if (error) throw new RemoteError(500, error.message ?? 'Failed to delete vouchers')
     result = data
+  } else if (path === '/vouchers/delete-tier') {
+    const b = body as { points: number }
+    const { data, error } = await supabase.rpc('delete_unclaimed_vouchers', { p_points: b.points })
+    if (error) throw new RemoteError(500, error.message ?? 'Failed to delete the card pool')
+    result = data
+  } else if (path === '/physical-cards/delete-batch') {
+    const b = body as { batchId: string }
+    const { data, error } = await supabase.rpc('delete_unactivated_physical_cards', { p_batch_id: b.batchId })
+    if (error) throw new RemoteError(500, error.message ?? 'Failed to delete the batch')
+    result = data
   } else {
     throw new RemoteError(400, `Unknown admin path: ${path}`)
   }
