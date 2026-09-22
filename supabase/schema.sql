@@ -1,6 +1,12 @@
 -- TNL Rewards - Supabase Schema
--- Apply with: supabase db push  (or paste into Supabase SQL Editor)
--- Run from the server/ directory or copy to your Supabase project
+-- Apply with the Supabase SQL Editor (Dashboard > SQL Editor > New query > paste all > Run).
+-- Idempotent: safe to re-run.
+
+create extension if not exists pgcrypto;
+
+-- ================================================================
+-- Tables
+-- ================================================================
 
 -- Users table
 create table if not exists public.users (
@@ -97,177 +103,39 @@ create table if not exists public.notices (
   created_at timestamptz not null default now()
 );
 
--- Enable RLS
-alter table public.users enable row level security;
-alter table public.vouchers enable row level security;
-alter table public.point_awards enable row level security;
-alter table public.physical_cards enable row level security;
-alter table public.sync_ops enable row level security;
-alter table public.sync_journal enable row level security;
-alter table public.sync_held enable row level security;
-alter table public.notices enable row level security;
+-- ================================================================
+-- Row Level Security
+-- ================================================================
+-- The app authenticates customers by phone + PIN (not Supabase Auth), so it
+-- holds only the anon key and there is never an auth.uid() to evaluate RLS
+-- policies against. RLS is therefore disabled so direct PostgREST reads and
+-- writes used by the offline-first client are allowed. Business rules are
+-- enforced inside the security-definer RPC functions below, not via RLS.
+
+alter table public.users disable row level security;
+alter table public.vouchers disable row level security;
+alter table public.point_awards disable row level security;
+alter table public.physical_cards disable row level security;
+alter table public.sync_ops disable row level security;
+alter table public.sync_journal disable row level security;
+alter table public.sync_held disable row level security;
+alter table public.notices disable row level security;
 
 -- ================================================================
--- Policies
+-- PIN hashing helper (pgcrypto bcrypt)
 -- ================================================================
+-- pin_hash is created by crypt(pin, gen_salt('bf')) and verified with
+-- pin_hash = crypt(pin, pin_hash). The literal value 'scrypt$seed' is a
+-- legacy placeholder that only ever matches PIN 0000 (seed admin + accounts
+-- migrated from the old hash scheme, see the seed section below).
 
--- Users: admin can read all; users can read own row
-drop policy if exists "admin can read all users" on public.users;
-create policy "admin can read all users"
-  on public.users for select
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "users can read own row" on public.users;
-create policy "users can read own row"
-  on public.users for select
-  using (auth.uid() = id);
-
--- Users: admin can update any; users can update own
-drop policy if exists "admin can update all users" on public.users;
-create policy "admin can update all users"
-  on public.users for update
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "users can update own row" on public.users;
-create policy "users can update own row"
-  on public.users for update
-  using (auth.uid() = id);
-
--- Users: admin can insert (for seed data); users can self-register
-drop policy if exists "admin can insert users" on public.users;
-create policy "admin can insert users"
-  on public.users for insert
-  with check (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "users can self-register" on public.users;
-create policy "users can self-register"
-  on public.users for insert
-  with check (true);
-
--- Point awards: users can read own; admin can read all
-drop policy if exists "admin can read all awards" on public.point_awards;
-create policy "admin can read all awards"
-  on public.point_awards for select
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "users can read own awards" on public.point_awards;
-create policy "users can read own awards"
-  on public.point_awards for select
-  using (auth.uid() = user_id);
-
--- Point awards: admin can insert/update; users can insert own (pending)
-drop policy if exists "admin can manage all awards" on public.point_awards;
-create policy "admin can manage all awards"
-  on public.point_awards for all
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
--- Vouchers: admin can read all; no customer access
-drop policy if exists "admin can read all vouchers" on public.vouchers;
-create policy "admin can read all vouchers"
-  on public.vouchers for select
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "admin can insert vouchers" on public.vouchers;
-create policy "admin can insert vouchers"
-  on public.vouchers for insert
-  with check (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "admin can update vouchers" on public.vouchers;
-create policy "admin can update vouchers"
-  on public.vouchers for update
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "admin can delete vouchers" on public.vouchers;
-create policy "admin can delete vouchers"
-  on public.vouchers for delete
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
--- Physical cards: admin can read all
-drop policy if exists "admin can read all physical cards" on public.physical_cards;
-create policy "admin can read all physical cards"
-  on public.physical_cards for select
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "admin can insert physical cards" on public.physical_cards;
-create policy "admin can insert physical cards"
-  on public.physical_cards for insert
-  with check (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "admin can update physical cards" on public.physical_cards;
-create policy "admin can update physical cards"
-  on public.physical_cards for update
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
--- Sync ops: users can insert own ops; admin can read all
-drop policy if exists "users can insert own sync ops" on public.sync_ops;
-create policy "users can insert own sync ops"
-  on public.sync_ops for insert
-  with check (auth.uid() = user_id);
-
-drop policy if exists "users can read own sync ops" on public.sync_ops;
-create policy "users can read own sync ops"
-  on public.sync_ops for select
-  using (auth.uid() = user_id);
-
-drop policy if exists "admin can read all sync ops" on public.sync_ops;
-create policy "admin can read all sync ops"
-  on public.sync_ops for select
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
--- Sync journal: admin can read/write; users can read own
-drop policy if exists "admin can manage sync journal" on public.sync_journal;
-create policy "admin can manage sync journal"
-  on public.sync_journal for all
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
--- Sync held: admin can read/write; users can read own
-drop policy if exists "admin can manage sync held" on public.sync_held;
-create policy "admin can manage sync held"
-  on public.sync_held for all
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
--- Notices: admin can read; users can read own
-drop policy if exists "admin can read all notices" on public.notices;
-create policy "admin can read all notices"
-  on public.notices for select
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'admin')
-  );
-
-drop policy if exists "users can read own notices" on public.notices;
-create policy "users can read own notices"
-  on public.notices for select
-  using (true);
+create or replace function public.scrypt_pin(p_pin text)
+returns text
+language sql
+volatile
+as $$
+  select crypt(p_pin, gen_salt('bf'));
+$$;
 
 -- ================================================================
 -- RPC: Verify login (phone + PIN) — returns user data on success
@@ -286,19 +154,11 @@ begin
     return jsonb_build_object('ok', false, 'error', 'Invalid phone number or PIN');
   end if;
 
-  -- Verify scrypt hash: hash = scrypt$<salt>$<derivedKey_hex>
-  -- For dev mode, 'scrypt$seed' is a placeholder that matches any PIN
-  v_match := false;
+  -- Legacy seed placeholder: only matches PIN 0000.
   if v_user.pin_hash = 'scrypt$seed' then
     v_match := (p_pin = '0000');
   else
-    begin
-      v_match := (
-        select v_user.pin_hash = ('scrypt$' || encode(digest(p_pin || substring(v_user.pin_hash from '\$(\w+)\$'), 'sha256'), 'hex'))
-      );
-    exception when others then
-      v_match := false;
-    end;
+    v_match := (v_user.pin_hash = crypt(p_pin, v_user.pin_hash));
   end if;
 
   if not v_match then
@@ -362,8 +222,7 @@ begin
     v_ref_code := upper(substring(p_name from '[a-zA-Z]+')) || floor(random() * 9000 + 1000)::text;
   end loop;
 
-  -- Hash PIN (simple: store scrypt$<salt>$hash — for production use proper scrypt)
-  v_pin_hash := 'scrypt$' || encode(digest(p_pin, 'sha256'), 'hex') || '$' || encode(digest(p_pin || 'salt', 'sha256'), 'hex');
+  v_pin_hash := public.scrypt_pin(p_pin);
 
   insert into public.users (id, phone, name, points, pin_hash, ref_code, role)
   values (v_user_id, p_phone, trim(p_name), 0, v_pin_hash, v_ref_code, 'customer')
@@ -527,10 +386,7 @@ declare
   v_created_at timestamptz;
   v_rows jsonb := '[]'::jsonb;
   v_code text;
-  v_taken jsonb;
-  v_taken_set jsonb := '[]'::jsonb;
   v_i integer;
-  v_result jsonb;
 begin
   -- Validate tier
   if p_points not in (1, 2, 3) then
@@ -591,7 +447,6 @@ declare
   v_created_at timestamptz;
   v_rows jsonb := '[]'::jsonb;
   v_kode text;
-  v_taken jsonb := '[]'::jsonb;
   v_i integer;
 begin
   if p_quantity < 1 or p_quantity > 200 then
@@ -688,8 +543,11 @@ end;
 $$;
 
 -- ================================================================
--- RPC: Apply sync ops (for offline-first protocol)
+-- RPC: Apply sync ops (offline-first protocol)
 -- ================================================================
+-- Applies each queued op authored on a device and returns per-op results in
+-- the same order ({opId, ok, reason?, message?, state?}). Everything runs
+-- inside one transaction, so a failure mid-loop rolls the whole batch back.
 create or replace function public.apply_sync_ops(p_ops jsonb)
 returns jsonb
 language plpgsql
@@ -697,46 +555,228 @@ security definer
 as $$
 declare
   v_op jsonb;
-  v_results jsonb := '[]'::jsonb;
+  v_payload jsonb;
   v_result jsonb;
-  v_user_id uuid;
+  v_results jsonb := '[]'::jsonb;
   v_user public.users;
+  v_user_id uuid;
+  v_code text;
+  v_kode text;
+  v_award_id uuid;
+  v_awarded_at double precision;
+  v_claimed public.vouchers;
+  v_card public.physical_cards;
+  v_live_total integer;
+  v_balance integer;
+  v_spent integer;
+  v_remaining integer;
+  v_ids uuid[];
 begin
   for v_op in select * from jsonb_array_elements(p_ops) loop
-    if v_op->>'type' = 'register_user' then
-      v_user_id := (v_op->>'payload')::jsonb->>'userId';
-      -- Upsert the user from the op payload
-      insert into public.users (id, phone, name, points, pin_hash, ref_code, role)
-      values (
-        v_user_id,
-        (v_op->>'payload')::jsonb->>'phone',
-        (v_op->>'payload')::jsonb->>'name',
-        0,
-        'scrypt$seed',
-        (v_op->>'payload')::jsonb->>'refCode',
-        'customer'
-      )
-      on conflict (phone) do nothing
-      returning * into v_user;
+    v_result := null;
+    begin
+      v_payload := v_op->'payload';
 
-      v_results := v_results || jsonb_build_object(
-        'opId', v_op->>'opId',
-        'ok', true,
-        'result', jsonb_build_object('opId', v_op->>'opId', 'ok', true, 'state', jsonb_build_object('customerName', v_user.name))
-      )::jsonb;
+      if v_op->>'type' = 'register_user' then
+        v_user_id := (v_payload->>'userId')::uuid;
+        v_user := null;
+        insert into public.users (id, phone, name, points, pin_hash, ref_code, role)
+        values (
+          v_user_id,
+          v_payload->>'phone',
+          v_payload->>'name',
+          0,
+          public.scrypt_pin(v_payload->>'pin'),
+          v_payload->>'refCode',
+          'customer'
+        )
+        on conflict (phone) do nothing
+        returning * into v_user;
 
-    elsif v_op->>'type' = 'redeem_voucher' then
-      v_results := v_results || jsonb_build_object('opId', v_op->>'opId', 'ok', true, 'result', jsonb_build_object('opId', v_op->>'opId', 'ok', true))::jsonb;
-    elsif v_op->>'type' = 'activate_physical_card' then
-      v_results := v_results || jsonb_build_object('opId', v_op->>'opId', 'ok', true, 'result', jsonb_build_object('opId', v_op->>'opId', 'ok', true))::jsonb;
-    elsif v_op->>'type' = 'spend_awards' then
-      v_results := v_results || jsonb_build_object('opId', v_op->>'opId', 'ok', true, 'result', jsonb_build_object('opId', v_op->>'opId', 'ok', true))::jsonb;
-    else
-      v_results := v_results || jsonb_build_object('opId', v_op->>'opId', 'ok', false, 'result', jsonb_build_object('opId', v_op->>'opId', 'ok', false, 'reason', 'unknown_op'))::jsonb;
-    end if;
+        if v_user.id is null then
+          v_result := jsonb_build_object(
+            'ok', false,
+            'reason', 'phone_taken',
+            'message', 'That phone number is already registered'
+          );
+        else
+          v_result := jsonb_build_object(
+            'ok', true,
+            'state', jsonb_build_object('customerName', v_user.name)
+          );
+        end if;
+
+      elsif v_op->>'type' = 'redeem_voucher' then
+        v_user_id := (v_payload->>'userId')::uuid;
+        v_award_id := (v_payload->>'awardId')::uuid;
+        v_code := v_payload->>'code';
+        v_awarded_at := (v_payload->>'awardedAt')::double precision;
+
+        -- Idempotent replay: the award row already exists for this op.
+        if exists (select 1 from public.point_awards where id = v_award_id) then
+          v_result := jsonb_build_object('ok', true, 'state', jsonb_build_object('alreadyApplied', true));
+        else
+          select * into v_claimed from public.vouchers where code = v_code;
+
+          if v_claimed.code is null then
+            v_result := jsonb_build_object(
+              'ok', false,
+              'reason', 'unknown_code',
+              'message', 'That kode was not recognised'
+            );
+          elsif v_claimed.redeemed_at is not null then
+            v_result := jsonb_build_object(
+              'ok', false,
+              'reason', 'already_redeemed',
+              'message', 'That card has already been used'
+            );
+          else
+            select coalesce(sum(points), 0) into v_live_total
+              from public.point_awards
+             where user_id = v_user_id
+               and expires_at > now();
+
+            if v_live_total + v_claimed.points > 50 then
+              v_result := jsonb_build_object(
+                'ok', false,
+                'reason', 'balance_cap',
+                'message', 'Points balance cap of 50 reached'
+              );
+            else
+              update public.vouchers
+                 set redeemed_by = v_user_id,
+                     redeemed_at = now()
+               where code = v_code;
+
+              insert into public.point_awards
+                (id, user_id, points, awarded_at, expires_at, source, voucher_code)
+              values (
+                v_award_id,
+                v_user_id,
+                v_claimed.points,
+                to_timestamp(v_awarded_at / 1000.0),
+                to_timestamp(v_awarded_at / 1000.0) + interval '7 days',
+                'voucher',
+                v_code
+              );
+
+              update public.users
+                 set points = v_live_total + v_claimed.points
+               where id = v_user_id
+              returning points into v_balance;
+
+              v_result := jsonb_build_object(
+                'ok', true,
+                'state', jsonb_build_object('remainingBalance', v_balance)
+              );
+            end if;
+          end if;
+        end if;
+
+      elsif v_op->>'type' = 'activate_physical_card' then
+        v_user_id := (v_payload->>'userId')::uuid;
+        v_kode := v_payload->>'kode';
+
+        if not exists (select 1 from public.users where id = v_user_id) then
+          v_result := jsonb_build_object(
+            'ok', false,
+            'reason', 'user_not_found',
+            'message', 'Account not found'
+          );
+        else
+          select * into v_card from public.physical_cards where kode = v_kode;
+
+          if v_card.kode is null then
+            v_result := jsonb_build_object(
+              'ok', false,
+              'reason', 'unknown_kode',
+              'message', 'That card kode was not recognised'
+            );
+          elsif v_card.activated_at is not null then
+            v_result := jsonb_build_object(
+              'ok', false,
+              'reason', 'already_activated',
+              'message', 'That card has already been activated by another account'
+            );
+          else
+            update public.physical_cards
+               set activated_by = v_user_id,
+                   activated_at = now()
+             where kode = v_kode;
+
+            v_result := jsonb_build_object('ok', true);
+          end if;
+        end if;
+
+      elsif v_op->>'type' = 'spend_awards' then
+        v_user_id := (v_payload->>'userId')::uuid;
+        select array_agg(x::uuid) into v_ids
+          from jsonb_array_elements_text(v_payload->'awardIds') x;
+
+        with del as (
+          delete from public.point_awards
+           where id = any(v_ids)
+             and user_id = v_user_id
+             and expires_at > now()
+          returning points
+        )
+        select coalesce(sum(points), 0) into v_spent from del;
+
+        if v_spent = 0 then
+          v_result := jsonb_build_object(
+            'ok', false,
+            'reason', 'insufficient_points',
+            'message', 'No live points available to spend'
+          );
+        else
+          select coalesce(sum(points), 0) into v_remaining
+            from public.point_awards
+           where user_id = v_user_id
+             and expires_at > now();
+
+          update public.users
+             set points = v_remaining
+           where id = v_user_id;
+
+          v_result := jsonb_build_object(
+            'ok', true,
+            'state', jsonb_build_object(
+              'remainingBalance', v_remaining,
+              'pointsSpent', v_spent
+            )
+          );
+        end if;
+
+      else
+        v_result := jsonb_build_object(
+          'ok', false,
+          'reason', 'unknown_op',
+          'message', 'Unknown sync op'
+        );
+      end if;
+
+      if v_result is null then
+        v_result := jsonb_build_object(
+          'ok', false,
+          'reason', 'unknown_op',
+          'message', 'Unknown sync op'
+        );
+      end if;
+    exception when others then
+      v_result := jsonb_build_object(
+        'ok', false,
+        'reason', 'internal',
+        'message', sqlerrm
+      );
+    end;
+
+    v_results := v_results || (jsonb_build_object('opId', v_op->>'opId') || v_result);
   end loop;
 
-  return jsonb_build_object('results', v_results, 'serverTime', extract(epoch from now()) * 1000);
+  return jsonb_build_object(
+    'results', v_results,
+    'serverTime', extract(epoch from now()) * 1000
+  );
 end;
 $$;
 
@@ -866,9 +906,46 @@ end;
 $$;
 
 -- ================================================================
+-- Access: anon/authenticated can call the RPCs and read the tables.
+-- RLS is disabled, so explicit table grants keep the anon client working.
+-- ================================================================
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated;
+
+grant execute on function public.scrypt_pin(text) to anon, authenticated;
+grant execute on function public.verify_login(text, text) to anon, authenticated;
+grant execute on function public.register_user(text, text, text) to anon, authenticated;
+grant execute on function public.redeem_voucher_card(text, uuid) to anon, authenticated;
+grant execute on function public.redeem_reward_points(uuid, integer) to anon, authenticated;
+grant execute on function public.activate_physical_card(text, uuid) to anon, authenticated;
+grant execute on function public.create_voucher_batch(integer, integer) to anon, authenticated;
+grant execute on function public.create_physical_card_batch(integer) to anon, authenticated;
+grant execute on function public.delete_claimed_vouchers(text[]) to anon, authenticated;
+grant execute on function public.get_voucher_cards_by_points(integer) to anon, authenticated;
+grant execute on function public.apply_sync_ops(jsonb) to anon, authenticated;
+grant execute on function public.build_snapshot(text, uuid) to anon, authenticated;
+grant execute on function public.count_customers() to anon, authenticated;
+grant execute on function public.list_voucher_batches() to anon, authenticated;
+grant execute on function public.list_physical_card_batches() to anon, authenticated;
+
+-- ================================================================
 -- Seed data
 -- ================================================================
-insert into public.users (phone, name, points, pin_hash, ref_code, role)
+-- Upsert the seed admin: keeps an existing account working by resetting it to
+-- the legacy PIN 0000 placeholder (in case the DB already has rows from an
+-- older hash scheme).
+insert into public.users (phone, name, points, pin_hash, ref_code, role, created_at)
 values
-  ('09518050546', 'Ramyun Admin', 0, 'scrypt$seed', 'ADMIN', 'admin')
-on conflict (phone) do nothing;
+  ('09518050546', 'Ramyun Admin', 0, 'scrypt$seed', 'ADMIN', 'admin', now())
+on conflict (phone) do update
+  set name = excluded.name,
+      pin_hash = 'scrypt$seed',
+      ref_code = 'ADMIN',
+      role = 'admin';
+
+-- Migrate any pre-existing accounts that were hashed under the old scheme
+-- (pin_hash not produced by pgcrypto bcrypt) to the legacy PIN 0000
+-- placeholder so those test accounts can still sign in.
+update public.users
+   set pin_hash = 'scrypt$seed'
+ where pin_hash not like '$2a$%';
