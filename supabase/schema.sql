@@ -250,6 +250,7 @@ returns table (points integer, new_balance integer, expires_at timestamptz)
 language plpgsql
 security definer
 as $$
+#variable_conflict use_column
 declare
   claimed public.vouchers;
   award public.point_awards;
@@ -304,6 +305,7 @@ returns table (remaining_points integer, points_spent integer, user_id uuid, cus
 language plpgsql
 security definer
 as $$
+#variable_conflict use_column
 begin
   select coalesce(sum(points), 0) into points_spent
     from public.point_awards
