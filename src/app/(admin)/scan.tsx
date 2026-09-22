@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router'
 import * as React from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { Audio } from 'expo-av'
+import { useAudioPlayer } from 'expo-audio'
 import QrCamera from '@/components/qr-scanner'
 import { Card, PrimaryButton } from '@/components/ui'
 import * as api from '@/lib/api'
@@ -38,35 +38,20 @@ export default function ScanScreen() {
   const [result, setResult] = React.useState<ScanResult | null>(null)
   const [manualUserId, setManualUserId] = React.useState('')
 
-  // Sound + haptics
-  const [successSound, setSuccessSound] = React.useState<Audio.Sound | null>(null)
-  const [errorSound, setErrorSound] = React.useState<Audio.Sound | null>(null)
-
-  React.useEffect(() => {
-    (async () => {
-      try {
-        const { sound: s1 } = await Audio.Sound.createAsync(require('@/assets/sounds/success.mp3'))
-        const { sound: s2 } = await Audio.Sound.createAsync(require('@/assets/sounds/error.mp3'))
-        setSuccessSound(s1)
-        setErrorSound(s2)
-      } catch {
-        // Sounds optional - haptics will still work
-      }
-    })()
-    return () => {
-      successSound?.unloadAsync()
-      errorSound?.unloadAsync()
-    }
-  }, [])
+  // Sound + haptics. useAudioPlayer releases the players on unmount.
+  const successSound = useAudioPlayer(require('@/assets/sounds/success.mp3'))
+  const errorSound = useAudioPlayer(require('@/assets/sounds/error.mp3'))
 
   function playSuccess(): void {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
-    successSound?.replayAsync()
+    successSound.seekTo(0)
+    successSound.play()
   }
 
   function playError(): void {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-    errorSound?.replayAsync()
+    errorSound.seekTo(0)
+    errorSound.play()
   }
 
   const autoResumeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)

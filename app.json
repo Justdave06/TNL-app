@@ -69,7 +69,13 @@
         }
       ],
       "expo-sharing",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-audio",
+        {
+          "recordAudioAndroid": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
@@ -78,7 +84,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "bd6a5485-5ef3-470b-8a13-b1e91d6062ff"
+        "projectId": "08c7b234-9919-4912-a428-5538144cbcea"
       }
     },
     "owner": "davejohn06"
